@@ -1,14 +1,18 @@
-#meta for dirichlet_prior
+# meta for ordinal_logistic_prior
 
-This folder contains files where I figure out the dirichlet prior in an ordered logistic model.
+This folder contains files where I try to figure out what kind of prior to use on cutpoints in an ordinal logistic model.
 
-The following files directly follow [Mike Betancourt's case study](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html)
+The induced dirichlet prior was developed by [Michael Betancourt]](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html)
 
-* `dirichlet_learn.R`
-* `simulate_ordered.stan`
-* `ordered_logistic_induced.stan`
+# folders contain Stan code
+* `gamma` contains Stan code for models with gamma priors on the cutpoints
+* `induced_dirichlet` contains Stan code for models with induced dirichlet priors on the cutpoints
+* `simulate` contains Stan code that simulates data from ordinal logistic models
 
-Next, I attempted adding a simple covariate $\beta * x$ where both $\beta$ and $x$ are drawn from the standard normal.
+# files
+* `prior_analysis.Rmd` Document with analysis of different priors and description of results
+* `prior_analysis_functions.R` helper functions
+* `prior_analysis_gamma.Rmd` analysis of gamma prior on cutpoints
+* `prior_analysis_induced_dirichlet.Rmd` analysis of induced dirichlet prior on cutpoints
+* `tests` tests for functions in `prior_analysis_functions.R`
 
-* `dirichlet_covar.R`
-* `simulated_ordered_covar.stan`
