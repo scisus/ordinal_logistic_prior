@@ -163,6 +163,9 @@ gammafits <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(s
 
 parallel::stopCluster(cl) #close the cluster
 
+```
+
+```{r gammaExtract}
 # extract params
 paramsgam <- lapply(gammafits,
                     function(x) {data.frame(rstan::extract(x) ) } )
@@ -177,7 +180,7 @@ parlist_gam <- map(parlist_gam, label_names, label="true")
 paramsgam <- map2(paramsgam, parlist_gam, cbind)
 ```
 
-```{r gammaParPlots}
+```{r gammaParPlots, fig.height=2}
 #plot params and diffs
 #map(paramsgam, parplot)
 map(paramsgam, posterior_differencer) %>%
@@ -185,46 +188,8 @@ map(paramsgam, posterior_differencer) %>%
 ```
 
 ```{r GammaHDPI}
-# calculate whether true value is in 50% hpdi
+# calculate whether true value is in HPDI
 
-# kludge HPDI
-HPDIlow <- function(x, prob) {
-    HPDI <- rethinking::HPDI(x, prob=prob)
-    return(HPDI[1])
-}
-
-HPDIhigh <- function(x, prob) {
-    HPDI <- rethinking::HPDI(x, prob=prob)
-    return(HPDI[2])
-}
-
-
-calc_HPDI <- function(params, prob) {
-    low <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIlow, prob=prob)
-    high <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIhigh, prob=prob)
-
-    # awkward formatting
-    hdpis <- dplyr::full_join(low, high) %>%
-        select(-contains("lp"))
-    colnames(hdpis) <- stringr::str_replace(colnames(hdpis), "_model", "")
-
-    # true param
-    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique)
-    colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
-    true <- select(true, colnames(hdpis))
-
-    # more awkward formatting
-    compframe <- dplyr::full_join(hdpis, true) %>%
-        t(.) %>%
-        data.frame()
-    colnames(compframe) <- c("low", "high", "true")
-    compframe$params <- rownames(compframe)
-
-    # true param in interval?
-    tf <- compframe %>% mutate(inint = true > low & true < high)
-    return(tf)
-
-}
 
 in50 <- map(paramsgam, calc_HPDI, prob=0.5)
 
@@ -253,8 +218,8 @@ prop_recaptured90 <- perform90 %>%
   full_join(parframe_gam) %>%
   arrange(beta, desc(all_captured))
 
-knitr::kable(prop_recaptured50, caption = "Proportion of params recaptured in 50% HPDI")
-knitr::kable(prop_recaptured90, caption = "Proportion of params recaptured in 90% HPDI")
+#knitr::kable(prop_recaptured50, caption = "Proportion of params recaptured in 50% HPDI")
+#knitr::kable(prop_recaptured90, caption = "Proportion of params recaptured in 90% HPDI")
 ```
 
 ```{r plotGammaRecaptureoverall}
@@ -262,244 +227,20 @@ ggplot(prop_recaptured50, aes(x=as.factor(shape), y=as.factor(beta_rate), fill=a
   geom_tile(colour="white") +
   geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI") +
+  ggtitle("Proportion of parameters recaptured in 50% HPDI") +
   scale_fill_gradient(low="white", high="steelblue")
 
 ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=all_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 90% HPDI") +
+  ggtitle("Proportion of parameters recaptured in 90% HPDI") +
   scale_fill_gradient(low="white", high="violetred")
 ```
 Parameters are most likely to be recaptured when transitions are medium fast (beta=1), shape parameters are higher than cutpoints, and beta is not too constrained (low beta rate). However when transitions are fast (and cutpoints correspondingly larger, very high shape values do not work well.) Choosing shape values that center the gamma prior relatively near the second cutpoint seems to work best.
 
 This is tricky to do, however, without knowing beta - or having a lot of knowledge of your system.
-```{r plotGammaRecapture}
-knitr::kable(perform50, caption = "Ability of the different models to recapture parameters in 50% HPDI. Each model only run only once, don't shoot me.")
 
-ggplot(perform50, aes(x=params, y=as.factor(modelid), fill=inint)) + 
-  geom_tile(color="black") +
-  scale_fill_viridis_d()  +
-  geom_text(aes(label=paste(shape, beta_rate, sep=","))) +
-  facet_wrap("beta", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI")
-    
-
-
-knitr::kable(perform90, caption = "Ability of the different models to recapture parameters in 90% HPDI. Each model only run only once, don't shoot me.")
-
-ggplot(perform90, aes(x=params, y=as.factor(modelid), fill=inint)) + 
-  geom_tile(color="black") +
-  scale_fill_viridis_d()  +
-  geom_text(aes(label=paste(shape, beta_rate, sep=","))) +
-  facet_wrap("beta", scales="free") +
-  ggtitle("Parameters recaptured in 90% HPDI")
-
-```
-
-
-
-#### Slow transition
-Estimates are better for slow parameters when shape parameters are large. When shape parameters are lower, beta and cutpoints are estimated more poorly, but the relationship between beta and cutpoints (the transitions h1 and h2) are still captured well.
-
-#### Fast transition
-Estimates are better for fast transitions when choosing a shape parameter near the cutpoints (20).
-
-The proportion of parameters recaptured (in the 50% HDPI) is highest when the transitions are slow (beta=0.5) and the shape parameter for the gamma prior is low. 
-
-```{r proportioncapture}
-
-
-```
-When transitions are slow, large shapes for gamma make it difficult to recapture parameters. When transitions are fast, constraining beta too much (eg. beta rate = 3) harms model performance. Moderate gamma shape parameters work best. 
-
-Getting the shape parameter "right" is more important than the beta rate parameter (over the ranges I've considered anyway). Unfortunately, "right" depends on the speed of transition, which we .... don't know in advance. Given the realities of phenology, I think that it's fair to say the speed is > 1 (at least with forcing units/x scaled the way they are.)
-
-Sadly, slow transition models are easier to fit. 
-
-```{r transitioncapture}
-transition_recaptured <- perform90 %>%
-  filter(params %in% c("c.1", "c.2")) %>%
-  group_by(modelid) %>%
-  summarise(h_captured = sum(inint)/n()) %>%
-  full_join(parframe_gam) %>%
-  arrange(beta, desc(h_captured))
- 
-knitr::kable(transition_recaptured)
-```
-The parameters I'm most interested in are the transition parameters (calculated as c/beta), h1 and h2. Unfortunately, these seem relatively difficult to recapture well. In the 50% HDPI, no rapid transition model gets either of these right. The slow model can get them right with a low shape and a constrained beta. In the 90% HDPI, models with rapid transition datasets *almost* catch up to the slow transitions. 
-
-Truly unfortunately, the prior parameters (gamma shape) that make recapture possible are basically opposite for slow and fast transition data. Slow transitions require small to moderate shapes to recapture parameters, but fast transitions require moderate to high transitions to fit. Fast transitions also need a less constrained beta.
-
-Shape = 10 was large for slow transitions and small for fast transitions and made it impossible for both models to recapture true params. 
-
-So how might I go about choosing a shape parameter for a gamma prior? I think I would assume my transition speed (beta) must be >1 and is probably ~2 because of biology. So then, a good gamma shape param choice would probably be around the values your data starts transitioning from state 2 to 3. This feels yucky.
-
-
-### Induced dirichlet prior with covariate
-How about an induced dirichlet prior?
-
-```{r paramsForIDModels}
-beta_rate <- c(1:3) # rate parameters for exponential prior on beta
-
-# different anchor points for induced dirichlet
-
-anchors <- c(0, 5, 10)
-
-
-slowframe_indi <- data.frame(beta = beta_slow, anchor=anchors, beta_rate=beta_rate, c.1 = cutpoints_slow[1], c.2=cutpoints_slow[2], h1=h[1], h2=h[2])
-fastframe_indi <- data.frame(beta = beta_fast, anchor=anchors, beta_rate=beta_rate, c.1 = cutpoints_fast[1], c.2=cutpoints_fast[2], h1=h[1], h2=h[2])
-parframe_indi <- rbind(slowframe_indi, fastframe_indi) %>%
-  tidyr::expand(tidyr::nesting(beta, c.1, c.2, anchor), h1, h2, beta_rate)
-parframe_indi$modelid <- 1:nrow(parframe_indi) #label the models
-parframe_indi <- dplyr::select(parframe_indi, modelid, beta, c.1, c.2, h1, h2, anchor, beta_rate)
-
-# START HERE
-knitr::kable(parframe, caption="beta parameters used to simulate data for a slow (0.5) and fast (2) transion. And shape and rate parameters to be used in the priors on beta and cutpoints to attempt to recover parameters")
-```{r dirichlet recapture}
-fitdir <- stan(file='dirichlet prior/dirichlet/dirichlet_covar.stan', data=input_data_for_model, chains=4)
-
-paramsdir <- data.frame(rstan::extract(fitdir))
-summary(paramsdir)
-
-pdir <- parplotter("dirichlet", paramsdir)
-pdir
-
-```
-Induced dirichlet does well - maybe better than gamma? It underestimates cutpoints and beta. It's also *very* sensitive to the prior on $\beta$. It fits at exp(1), but the model is full of divergences at exp(2). Gamma is much more forgiving of the choice of $\beta$ prior.
-
-I wonder if it's because of weird stuff happening when both $c$ and $\beta$ get too small? Increasing the anchor point in the induced dirichlet prior to 2 fixes the problem!
-
-
-```{r compare gamma and dirichlet}
-
-
-ddir <- diffplotter(paramsdir, priorgroups="dirichlet prior, no groups")
-dgam <- diffplotter(paramsgam, priorgroups = "gamma prior, no groups")
-ggarrange(dgam, ddir, ncol=1)
-
-ggarrange(pgam, pdir, ncol=1)
-
-```
-
-Dirichlet and gamma performing similarly. Dirichlet a little better maybe? Gamma tends to overestimate parameters and dirichlet to underestimate them.
-
-<!--
-## Simulate more data - uniform covariate?
-What if your data is, unlike mine, collected more uniformly across the covariate range?
-
-```{r data simulation}
-N = 500
-G = 7
-K = 3
-
-c <- c(3,7) # cutpoints
-beta = 0.5
-h <- c/beta
-x <- runif(N, min=0, max=20) #covariate
-hist(x)
-```
-
-```{r simulate covar}
-input_data_for_simulation <- list("N" = N, "K"=3, "x" = x, "c" = c, "beta" = beta)
-
-simu <- stan(file='dirichlet prior/covar_sim.stan', iter=1, chains=1,
-             algorithm="Fixed_param", data=input_data_for_simulation)
-
-simu_params <- rstan::extract(simu)
-
-input_data_for_model <- list("N" = N, "K" = K, "x" = x, "y" = array(simu_params$y[1,]))
-
-inputdf <- data.frame(input_data_for_model)
-
-ggplot(inputdf, aes(x=x, colour=as.factor(y))) +
-    stat_ecdf() +
-    geom_vline(xintercept=h)
-
-plot(input_data_for_model$x, input_data_for_model$y)
-title("Simulated data with cutpoints")
-abline(v=h)
-
-```
-
-### Induced dirichlet prior with uniformly distributed covariate
-```{r dirichlet recapture}
-fitdir <- stan(file='dirichlet prior/dirichlet/dirichlet_covar.stan', data=input_data_for_model, chains=4)
-
-paramsdir <- data.frame(rstan::extract(fitdir))
-summary(paramsdir)
-
-pdir <- parplotter("dirichlet", paramsdir)
-pdir
-
-diffplotter(model_params=paramsdir, priorgroups="induced dirichlet prior, no groups")
-
-```
-
-When the covariate is more evenly distributed, the dirichlet does a great job! 
--->
-## Simulate more data - $\beta=2$
-
-How do the different priors behave when the transitions are sharper, **i.e.** $\beta$ is larger
-
-
-```{r data simulation}
-N = 500
-G = 7
-K = 3
-
-c <- c(12,28) # cutpoints
-beta = 2
-h <- c/beta
-x <- rtnorm(n=N, mean=mean(h), sd=mean(h)/4, min=0, max=20) #covariate
-hist(x)
-```
-
-```{r simulate covar}
-input_data_for_simulation <- list("N" = N, "K"=3, "x" = x, "c" = c, "beta" = beta)
-
-simu <- stan(file='dirichlet prior/covar_sim.stan', iter=1, chains=1,
-             algorithm="Fixed_param", data=input_data_for_simulation)
-
-simu_params <- rstan::extract(simu)
-
-input_data_for_model <- list("N" = N, "K" = K, "x" = x, "y" = array(simu_params$y[1,]))
-
-inputdf <- data.frame(input_data_for_model)
-
-ggplot(inputdf, aes(x=x, colour=as.factor(y))) +
-    stat_ecdf() +
-    geom_vline(xintercept=h)
-
-plot(input_data_for_model$x, input_data_for_model$y)
-title("Simulated data with cutpoints")
-abline(v=h)
-
-```
-
-
-
-Will the gamma still work well under these conditions?
-### Gamma prior with covariate
-```{r gamma recapture}
-fitgam <- stan(file='dirichlet prior/gamma/gamma_covar.stan', data=input_data_for_model, chains=4)
-
-paramsgam <- data.frame(rstan::extract(fitgam)) 
-
-summary(paramsgam)
-
-pgam <- parplotter("gamma", paramsgam)
-pgam
-
-diffplotter(model_params=paramsgam, priorgroups="gamma prior, no groups")
-```
-
-Gamma model is relatively sensitive to gamma prior on the cutpoints. When gamma "mean" is the center of the true cutpoints, cutpoints are slightly overestimated, as is beta. h1 is overestimated and h2 is underestimated. When it's 10 (half the "mean" cutpoint here), cutpoints are underestimated by ~2-4). However, the low prior mean with underestimated cutpoints actually estimates h1 and h2 better.
-
-Transitions are estimated better even as the parameters that calculate that transition are estimated worse. So. The "bad" priors are doing a better job at capturing the *relationship* between beta and the cutpoints, which is ultimately what I'm interested in.
-
-On the other hand, I really do need to do a good job estimating beta because otherwise I won't be able to estimate my group effects later on.
 
 ### Dirichlet prior with covariate
 
