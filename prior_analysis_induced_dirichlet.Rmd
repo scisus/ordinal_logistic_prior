@@ -16,7 +16,6 @@ library(rstan)
 rstan_options(auto_write=TRUE)
 ```
 ```{r depends}
-source('priorAnalysisGammaFunctions.R')
 source('prior_analysis_functions.R')
 ```
 

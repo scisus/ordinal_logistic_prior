@@ -2,19 +2,19 @@
 
 # generate samples from a truncated normal distribution.
 # n = how many samples, mean = mean, sd = sd. min and max are the limits of the distribution/truncation points.
-rtnorm <- function(n, mean, sd, min, max) {
-    x <- rnorm(n, mean=mean, sd=sd)
-    x <- x[x >= min & x <= max]
-    while(length(x) < n) {
-        newx <- rnorm(1, mean=mean, sd=sd)
-        while(newx <= min | newx >= max) {
-            newx <- rnorm(1, mean=mean, sd=sd)
-        }
-        x <- c(x, newx)
-    }
-    length(x)==n
-    return(x)
-}
+# rtnorm <- function(n, mean, sd, min, max) {
+#     x <- rnorm(n, mean=mean, sd=sd)
+#     x <- x[x >= min & x <= max]
+#     while(length(x) < n) {
+#         newx <- rnorm(1, mean=mean, sd=sd)
+#         while(newx <= min | newx >= max) {
+#             newx <- rnorm(1, mean=mean, sd=sd)
+#         }
+#         x <- c(x, newx)
+#     }
+#     length(x)==n
+#     return(x)
+# }
 
 # Build a list of objects that are used for simulating data in stan. simu_pars is a dataframe of beta and cutpoint parameters, inputlist is what gets fed directly to stan, and h is the transition points and is useful for plotting later
 set_simulation_parameters <- function() {
