@@ -41,6 +41,25 @@ set_simulation_parameters <- function(N=100) {
     return(list(pars=simu_pars, inputlist=inputs_for_sim, h=h))
 }
 
+# simulate data from an ordinal logistic model and format it as input for stan. input is a list for stan, as is output. groups is TRUE or FALSE
+simulate_data <- function(input, prior, groups) {
+    # simulate data
+    if (isTRUE(groups)) {
+        simu <- rstan::stan(file='simulate/covar_group_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
+    } else {
+        simu <- rstan::stan(file='simulate/covar_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
+    }
+    # extract data from stan model
+    simu_params <- rstan::extract(simu)
+    # format data as input to another stan model
+    input_data_for_model <- list("N" = input$N, "K" = input$K, "x" = input$x, "y" = array(simu_params$y[1,]))
+
+    if (groups==TRUE) {
+        append(input_data_for_model, "G"=input$G, "GID" = input$GID)
+    }
+
+    return(input_data_for_model)
+}
 # Plot simulated data to make sure it's reasonable
 plot_simulated_data <- function(simdat, simulation_input) {
     simdf <- purrr::map(simdat, .f = function(x) {x[c("x", "y")]}) %>%
@@ -62,10 +81,32 @@ plot_simulated_data <- function(simdat, simulation_input) {
     cowplot::plot_grid(p1, p2, ncol=2)
 }
 
+# make shape and rate parameters for a gamma distribution centered on the mean of h (a vector) with spread scaled by a factor (scaler). Larger factors make the distribution skinnier and smaller ones make it fatter. "h" are the half transition points, so the mean is basically the midpoint of your state 2 in a 3 state system when you have data like mine.
+make_gamma_pars <- function(factor, h) {
+    center <- mean(h)
+    shape <- mean(h) * factor
+    cut_rate <- shape/center
+    sr <- data.frame(shape, cut_rate)
+    return(sr)
+}
 # turn a dataframe of parameter values into a list of parameters for each model run. Each row of the dataframe becomes a dataframe in a list
 make_parframe_list <- function(parframe) {
     parlist <- split(parframe, seq(nrow(parframe)))
     names(parlist) <- parframe$modelid
 
     return(parlist)
+}
+#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
+bind_true_model_pars <- function(fits, parlist) {
+    # extract params from model object
+    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
+
+    # label params as coming from the model or as true params used to
+    params <- map(params, label_names, label="model")
+    parlist <- map(parlist, label_names, label="true")
+
+    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
+    params <- map2(params, parlist, cbind)
+
+    return(params)
 }
