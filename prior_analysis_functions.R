@@ -17,12 +17,12 @@
 # }
 
 # Build a list of objects that are used for simulating data in stan. simu_pars is a dataframe of beta and cutpoint parameters, inputlist is what gets fed directly to stan, and h is the transition points and is useful for plotting later
-set_simulation_parameters <- function() {
-    N <- 50
+set_simulation_parameters <- function(N=100) {
+    N <- N
     K <- 3
 
     beta <- data.frame(transition = c("slow", "medium", "fast"), beta=c(0.5, 1, 2))
-    cutpoints <- data.frame(c.1= c(4,8,16), c.2=c(6, 12, 24), transition=c("slow", "medium", "fast"))
+    cutpoints <- data.frame(c.1= c(5, 10, 20), c.2=c(7.5, 15, 30), transition=c("slow", "medium", "fast"))
 
     simu_pars <- merge(beta, cutpoints)
 
@@ -33,7 +33,7 @@ set_simulation_parameters <- function() {
 
     # covariate over full range of heat accumulation (risto scale) Jan-Julyish
     #x <- rtnorm(n=N, mean=mean(h), sd=2, min=0, max=20) #covariate
-    x <- runif(n=N, min=0, max=20)
+    x <- runif(n=N, min=8, max=18)
 
     inputs_for_sim <- split(simu_pars, simu_pars$transition) %>%
         purrr::map(.f=function(y) {list("N" = N, "K" = K, "c" = c(y$c.1, y$c.2), "beta"=y$beta, "h" = h, "x" = x)})
