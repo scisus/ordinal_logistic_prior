@@ -108,14 +108,6 @@ beta_rate <- c(1:3) # rate parameters for exponential prior on beta
 
 # shape and rate parameters for gamma prior on cutpoints, all centered on mean transition point
 
-# make shape and rate parameters for a gamma distribution centered on the mean of h (a vector) with spread scaled by a factor (scaler). Larger factors make the distribution skinnier and smaller ones make it fatter. "h" are the half transition points, so the mean is basically the midpoint of your state 2 in a 3 state system when you have data like mine.
-make_gamma_pars <- function(factor, h) {
-  center <- mean(h)
-  shape <- mean(h) * factor
-  cut_rate <- shape/center
-  sr <- data.frame(shape, cut_rate)
-  return(sr)
-}
 
 factors <- list(fat=0.25, normal=1, skinny=2)
 
