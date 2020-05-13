@@ -60,17 +60,22 @@ simulate_data <- function(input, prior, groups) {
 
     return(input_data_for_model)
 }
+
+
 # Plot simulated data to make sure it's reasonable
 plot_simulated_data <- function(simdat, simulation_input) {
+    # format for plotting
     simdf <- purrr::map(simdat, .f = function(x) {x[c("x", "y")]}) %>%
         purrr::map_dfr(.f = bind_rows, .id=".id")
 
+    # scatterplot
     p1 <- ggplot(simdf, aes(x=x, y=y)) +
         geom_jitter(shape=1, height=0.1, alpha=0.5) +
         geom_vline(xintercept = simulation_input[[1]]$h) +
         ggtitle("Simulated data with cutpoints") +
         facet_grid(.id ~ .)
 
+    # cumulative plot
     p2 <- ggplot(simdf, aes(x=x, colour=as.factor(y))) +
         stat_ecdf() +
         geom_vline(xintercept=simulation_input[[1]]$h) +
@@ -89,6 +94,7 @@ make_gamma_pars <- function(factor, h) {
     sr <- data.frame(shape, cut_rate)
     return(sr)
 }
+
 # turn a dataframe of parameter values into a list of parameters for each model run. Each row of the dataframe becomes a dataframe in a list
 make_parframe_list <- function(parframe) {
     parlist <- split(parframe, seq(nrow(parframe)))
@@ -96,6 +102,7 @@ make_parframe_list <- function(parframe) {
 
     return(parlist)
 }
+
 #bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
 bind_true_model_pars <- function(fits, parlist) {
     # extract params from model object
