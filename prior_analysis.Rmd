@@ -134,48 +134,24 @@ parframe_gam$h2 <- simulation_input$h[1]
 parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
 
 
-
-knitr::kable(parframe_gam, caption="model configurations used to try to recapture params")
+knitr::kable(parframe_gam, caption="model parameterizations used to try to recapture params")
 ```
 
-So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the beta's exponential prior and 3 shape and rate combinations for the cutpoints' gamma prior, a total of 27 model runs.
+So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
 
-```{r GammaRecapture, fig.height="200px", cache=TRUE}
+As beta gets larger, cut points get smaller and cut points priors need to be able to "reach" small values. As beta gets smaller, cutpoints need to be able to "reach" larger values. 
+
+```{r GammaRecapture, include=FALSE, cache=TRUE}
 # Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
 
 # format parframe so it works with parLapply better
-parlist_gam <- split(parframe_gam, seq(nrow(parframe_gam))) 
-names(parlist_gam) <- parframe_gam$modelid
+parlist_gam <- make_parframe_list(parframe_gam)
 
-fit_gamma_model <- function(simdatlist, pars, groups) {
-  #choose whether to use data simulated with a rapid or slow transition
-  if (pars$transition == "slow") {
-    simdat <- simdatlist$slow
-  }
-  if (pars$transition == "medium") {
-    simdat <- simdatlist$medium
-  }
-  if (pars$transition == "fast") {
-    simdat <- simdatlist$fast
-  }
-  #extract parameters for prior distribtuions
-  simdat$shape <- pars$shape
-  simdat$beta_rate <- pars$beta_rate
-  simdat$cut_rate <- pars$cut_rate
-  
-  #fit the model
-  if (isTRUE(groups)) {
-    fitgam <- stan(file='dirichlet prior/gamma/gamma_covar_group.stan', data=simdat, chains=4, cores=4)
-  } else {
-    fitgam <- stan(file='dirichlet prior/gamma/gamma_covar.stan', data=simdat, chains=4, cores=4)
-  }
-  return(fitgam)
-}
 
 # run all models, parallelized
 
-# make a cluster, leaving 20 cores free for other folks
-no_cores <- parallel::detectCores() - 20
+# make a cluster using half your cores
+no_cores <- parallel::detectCores()/2
 cl <- parallel::makeCluster(no_cores)
 
 # export the stuff you need to run on the cluster
