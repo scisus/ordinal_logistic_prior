@@ -336,7 +336,7 @@ G = 7
 K = 3
 
 # parameters
-c <- c(3,7) # cutpoints
+c <- c(3,7) # cut points
 beta = 0.5
 
 # simulate individual group effects
@@ -431,7 +431,7 @@ G = 7
 K = 3
 
 # parameters
-c <- c(5,10) # cutpoints
+c <- c(5,10) # cut points
 beta = 2
 
 # simulate individual group effects
