@@ -127,7 +127,6 @@ pars_gamma %>%
  # facet_grid(name ~ .) +
   ggtitle("Gamma priors all centered on 10", subtitle = "with different shape and rate params")
 
-
 # make a nice dataframe with all combinations params used to simulate data and model params used to try to recover those params
 parframe_gam <- pars_gamma %>%
   purrr::map_dfr(.f=bind_cols, .id=".id") %>%
@@ -135,7 +134,7 @@ parframe_gam <- pars_gamma %>%
   dplyr::rename(gammaid=.id, beta_rate=y) %>%
   merge(simulation_input$pars)
 parframe_gam$h1 <- simulation_input$h[1]
-parframe_gam$h2 <- simulation_input$h[1]
+parframe_gam$h2 <- simulation_input$h[2]
 parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
 
 
