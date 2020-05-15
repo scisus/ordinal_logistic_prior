@@ -103,6 +103,57 @@ make_parframe_list <- function(parframe) {
     return(parlist)
 }
 
+# fit a model with a gamma prior in stan. simdatlist is a list of simulated data (1 simulated dataset per list entry), pars is a list of parameter values (1 set of parameter values per list entry) and groups is TRUE or FALSE indicating whether you're trying to fit groups.
+fit_gamma_model <- function(simdatlist, pars, groups) {
+    #choose whether to use data simulated with a rapid or slow transition
+    if (pars$transition == "slow") {
+        simdat <- simdatlist$slow
+    }
+    if (pars$transition == "medium") {
+        simdat <- simdatlist$medium
+    }
+    if (pars$transition == "fast") {
+        simdat <- simdatlist$fast
+    }
+    #extract parameters for prior distribtuions
+    simdat$shape <- pars$shape
+    simdat$cut_rate <- pars$cut_rate
+    simdat$beta_rate <- pars$beta_rate
+    
+    #fit the model
+    if (isTRUE(groups)) {
+        fitgam <- stan(file='gamma/gamma_covar_group.stan', data=simdat, chains=4, iter = 3500, warmup=1000)
+    } else {
+        fitgam <- stan(file='gamma/gamma_covar.stan', data=simdat, chains=4, iter=20, warmup=10)
+    }
+    return(fitgam)
+}
+
+## append a label (string) to all columnnames in a dataframe (x)
+label_names <- function(x, label) {
+    colnames(x) <- paste0(colnames(x), "_", label)
+    return(x)
+}
+
+# take a stan object and find out if there's anything egregiously wrong with it
+check_model <- function(stanobj) {
+    nuts <- nuts_params(stanobj)
+    divergences <- dplyr::filter(nuts, Parameter=="divergent__" & Value==1) %>%
+        nrow()
+    rhats <- rhat(stanobj)
+    bad_rhats <- sum(rhats > 1)
+    nefrats <- neff_ratio(stanobj)
+    bad_neff <- sum(nefrats < 0.1, is.nan(nefrats), na.rm=TRUE)
+    diagnostics <- data.frame(divergences = divergences, bad_rhats=bad_rhats, bad_neff=bad_neff)
+    return(diagnostics)
+}
+
+# run check_model on a list of models and add a column that names each row by the list name
+check_list_of_models <- function(model_list) {
+    map_dfr(model_list, check_model, .id=".id") %>%
+        rename(modelid=.id)
+}
+
 #bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
 bind_true_model_pars <- function(fits, parlist) {
     # extract params from model object
@@ -116,4 +167,60 @@ bind_true_model_pars <- function(fits, parlist) {
     params <- map2(params, parlist, cbind)
 
     return(params)
+}
+
+HPDIlow <- function(x, prob) {
+    HPDI <- rethinking::HPDI(x, prob=prob)
+    return(HPDI[1])
+}
+
+HPDIhigh <- function(x, prob) {
+    HPDI <- rethinking::HPDI(x, prob=prob)
+    return(HPDI[2])
+}
+
+calc_HPDI <- function(params, prob) {
+    low <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIlow, prob=prob)
+    high <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIhigh, prob=prob)
+    
+    # awkward formatting
+    hdpis <- dplyr::full_join(low, high) %>%
+        select(-contains("lp"))
+    colnames(hdpis) <- stringr::str_replace(colnames(hdpis), "_model", "")
+    
+    # true param
+    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique)
+    colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
+    true <- select(true, colnames(hdpis))
+    
+    # more awkward formatting
+    compframe <- dplyr::full_join(hdpis, true) %>%
+        t(.) %>%
+        data.frame()
+    colnames(compframe) <- c("low", "high", "true")
+    compframe$params <- rownames(compframe)
+    
+    # true param in interval?
+    tf <- compframe %>% mutate(inint = true > low & true < high)
+    return(tf)
+    
+}
+
+# function to plot modeled parameters with label being a string to label the graph (usually prior and whether groups were included and pardf is the modeled parameter dataframe) trueparams is a one row dataframe of true parameters. h is a global parameter have fun!
+parplot <- function(pars) {
+    pars <- dplyr::select(pars, starts_with("c"), starts_with("beta"), starts_with("h"), starts_with("modelid")) # drop character cols
+    cutplot <- mcmc_areas(pars, regex_pars="c.\\d_model") +
+        geom_vline(xintercept=c(unique(pars$c.1_true), unique(pars$c.2_true)))
+    
+    betaplot <- mcmc_areas(pars, pars="beta_model") +
+        geom_vline(xintercept=unique(pars$beta_true))
+    
+    h1plot <- mcmc_areas(pars, regex_pars = "h1_model") +
+        geom_vline(xintercept=unique(pars$h1_true))
+    h2plot <- mcmc_areas(pars, regex_pars = "h2_model") +
+        geom_vline(xintercept=unique(pars$h2_true))
+    allplot <- cowplot::plot_grid(cutplot, betaplot, h1plot, h2plot,
+                                  nrow=1, ncol=4,
+                                  labels=paste("modelid =", unique(pars$modelid_true)))
+    print(allplot)
 }
