@@ -143,7 +143,9 @@ knitr::kable(parframe_gam, caption="model parameterizations used to try to recap
 
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
 
-As beta gets larger, cut points get smaller and cut points priors need to be able to "reach" small values. As beta gets smaller, cutpoints need to be able to "reach" larger values. 
+```{r paramsTableGamma}
+knitr::kable(parframe_gam, caption="Model parameterizations used to try to recapture params")
+```
 
 ```{r GammaRecapture, include=FALSE, cache=TRUE}
 # Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
@@ -191,6 +193,8 @@ map(paramsgam, posterior_differencer) %>%
     map2(.y=paramsgam, .f=diffplotter)
 ```
 
+
+Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
 ```{r GammaHDPI}
 # calculate whether true value is in HPDI
 
@@ -241,10 +245,22 @@ ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=all_captur
   ggtitle("Proportion of parameters recaptured in 90% HPDI") +
   scale_fill_gradient(low="white", high="violetred")
 ```
-Parameters are most likely to be recaptured when transitions are medium fast (beta=1), shape parameters are higher than cutpoints, and beta is not too constrained (low beta rate). However when transitions are fast (and cutpoints correspondingly larger, very high shape values do not work well.) Choosing shape values that center the gamma prior relatively near the second cutpoint seems to work best.
 
-This is tricky to do, however, without knowing beta - or having a lot of knowledge of your system.
+Most models return all parameters in the 90% HPDI, but a skinny gamma prior makes it harder to return parameters, especially when $\beta$ deviates from 1. 
 
+Which parameters are easier or harder to recapture?
+
+
+
+A skinny gamma prior centered in between the transition points doesn't work unless the slope is near one (putting the mean of the transition points and the mean of the cutpoints in the same ballpark). (See models 24, 15, 6)
+
+A fast transition underlying speed in the data combined with a fat gamma prior on the cutpoints and a very loose prior on beta make it harder to recapture parameters (see model 1).
+
+All parameters except the second transition point ($h2$) are recaptured in the 90% HPDI. 
+
+$h$ is *never* recaptured in the 50% HPDI, and, while $h1$ is recaptured in all 90% HPDIs, $h2$ never is. That's a bummer, since that's what I actually want to know. Also, how can $c_2$ and $\beta$ be captured, but $h_2$ not be when $h_2 = \frac{c_2}{\beta}$?
+
+The best choices for your prior parameters in this situation is a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
 
 ### Dirichlet prior with covariate
 
@@ -265,9 +281,9 @@ diffplotter(model_params=paramsdir, priorgroups="induced dirichlet prior, no gro
 
 
 
-When the transition between states is relatively rapid, the dirichlet struggles a bit. It's really underestimating both cutpoints and beta - but getting the inflection points quite right. This occurs with a $\beta$ of exp(2) and 1. If the $\beta$ prior is too loose (exp(0.5)) or too tight (exp(4)), the induced dirichlet fails.
+When the transition between states is relatively rapid, the dirichlet struggles a bit. It's really underestimating both cut points and beta - but getting the inflection points quite right. This occurs with a $\beta$ of exp(2) and 1. If the $\beta$ prior is too loose (exp(0.5)) or too tight (exp(4)), the induced dirichlet fails.
 
-The anchor point in the dirichlet also really matters to cutpoint estimation. Anchors much lower than the first true cutpoint really push the cutpoint estimate down. Anchors closer to the midpoint of the true cutpoint do better at estimating cutpoints, but worse at estimating transitions.
+The anchor point in the dirichlet also really matters to cutpoint estimation. Anchors much lower than the first true cutpoint really push the cutpoint estimate down. Anchors closer to the midpoint of the true cutpoint do better at estimating cut points, but worse at estimating transitions.
 
 
 
@@ -296,10 +312,10 @@ ggarrange(pgam, pdir, ncol=1)
 
 ```
 
-Gamma prior model does underestimate both cutpoints and beta, but not as much as the dirichlet does. However, the inflection points/half transition points (h1 and h2) are maybe estimated a bit better by the dirichlet?
+Gamma prior model does underestimate both cut points and beta, but not as much as the dirichlet does. However, the inflection points/half transition points (h1 and h2) are maybe estimated a bit better by the dirichlet?
 
 ## Conclusions on gamma vs induced dirichlet
-For my case - where cutpoints and beta are positive and most data is likely to be collected around state 2.
+For my case - where cut points and beta are positive and most data is likely to be collected around state 2.
 
 
 
@@ -402,7 +418,7 @@ On the one hand, this is not great from a model perspective. OTOH, these are pre
 
 ### These notes are for data simulated around an h based on the entire population, including groups
 
-Tail ESS errors with iter at 4000, increased to 5000. No more warnings. But how does estimation go? Still badly. Fails to distinguish between groups, overestimates beta, underestimates cutpoints.
+Tail ESS errors with iter at 4000, increased to 5000. No more warnings. But how does estimation go? Still badly. Fails to distinguish between groups, overestimates beta, underestimates cut points.
 
 
 ## Group effects about 1/4 the size of beta.
@@ -470,11 +486,11 @@ pgam
 
 ```
 
-Model doesn't give any obvious warnings, but  it overestimates cutpoints, underestimates beta, and dramatically overestimates betags.
+Model doesn't give any obvious warnings, but  it overestimates cut points, underestimates beta, and dramatically overestimates betags.
 
 If I change the priors from `cutpoints ~ gamma(10,1)` to `gamma(5,1)` and reduce the sigma_group prior to `exp(5)` from `exp(4)`, it does the same.
 
-If I bump up cutpoints so that the covariate distribution isn't bumping up against 0, beta is underestimated and group betas really overestimated.
+If I bump up cut points so that the covariate distribution isn't bumping up against 0, beta is underestimated and group betas really overestimated.
 
 If I strongly constrain the sigma_group prior to `exp(10)`, it doesn't change anything.
 
