@@ -30,24 +30,27 @@ rstan_options(auto_write=TRUE)
 
 ## Prior choice
 
-Michael Betancourt thinks that an induced dirichlet prior may be a [good choice](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) for ordinal logistic models.
+Michael Betancourt thinks that an [induced dirichlet prior](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) on the cut points may be a good choice for ordinal logistic models.
 
 When I modelled phenology using an ordinal logistic model, I used
 
-* a gamma distribution for the prior on the cut points
-* an exponential distribution distribution for the transition speed/slope $\beta$
+* a gamma distribution for the prior on the cut points, $c$
+* an exponential distribution distribution for the transition speed/slope, $\beta$
     * normal distributions for group effects on the slope
 
-Normally, priors are bottom up - you choose a distribution for each prior. This is tricky for the cutpoints in an ordinal logistic model because they're defined on an abstract latent space so you can't easily use your domain expertise, but a good prior is incredibly important in these models, because ordinal logistic models with covariates are inherently non-identifiable. (Because $beta$s and cut points depend on one another.)
+Normally, priors are bottom up - you choose a prior distribution for each parameter in your model. This is tricky for the cut points in an ordinal logistic model because they're defined on an abstract latent space where your domain expertise doesn't really apply. But you really want to choose a good prior in ordinal logistic models, because ordinal logistic models with covariates are inherently non-identifiable. (Because $\beta$ and $c$ depend on one another.)
 
 Betancourt says that
+
 > To avoid the non-identifiability of the interior cut points from propagating to the posterior distribution we need a principled prior model that can exploit domain expertise to consistently regularize all of the internal cut points at the same time. Regularization of the cut points, however, is subtle given their ordering constraint. Moreover domain expertise is awkward to apply on the abstract latent space where the internal cut points are defined.
+
+He develops an induced dirichlet prior on the cut points. I want to compare the induced dirichlet and gamma priors on cut points for my situation. 
 
 If I simulate data like mine using an ordinal logistic model, can I recapture the parameters using an ordinal logistic model with a gamma or induced dirichlet prior on the cut points?
 
-I don't actually care about recapturing the cut points or beta. I do care about recapturing the transition points, $h$, though. 
+At this point, I don't actually care about recapturing the cut points or beta. I do care about recapturing the transition points, $h$, though. $h$ are the points at which half of the population has transitioned from one state to another and is calculated as $h = \frac{c}{\beta}$. Eventually I will want to consider how different groups affect $h$ through deviations from the main slope $\beta$ (*e.g* $h = \frac{c}{\beta + \beta_{group_i}}$) and so estimating $\beta$s well might be more important then. But for now, let's just consider a an ordinal logistic model with a covariate/latent effect and no groups.
 
-# Goals
+## Goals
 1) When can I recapture parameters with a gamma prior?
 2) When can I recapture parameters with an induced dirichlet prior?
 3) Which one works best?
@@ -55,15 +58,15 @@ I don't actually care about recapturing the cut points or beta. I do care about 
 # Simulate data
 First let's simulate some data that's kind of like mine.
 
-I have three potential states `K` and a latent effect/covariate `x`. `x` is always positive and measurements are only made when `x` is between 8 and 18. Data collection begins when workers notice trees are approaching state 2 and stops as trees enter state 3.
+I have three potential states $K$ and a latent effect/covariate $x$. $x$ is always positive and measurements are only made when $x$ is between `8` and `18`. Data collection begins when workers notice trees are approaching state `2` and stops as trees enter state `3`.
 
-I simulate 3 datasets with slow ($\beta = 0.5$), medium ($\beta = 1$), and fast ($\beta = 2$) transition speeds  and one with a slow transition speed . I want the transitions to occur at the same `x` for both datasets. The halfway transition points `h` will be at `x= 10` and `x=15`. $h$ is calculated with cut points $c$ and transition speed $\beta$ - $h = \frac{c}{\beta}$ So while the transition points will stay the same in each simulated dataset, the cut points will differ. 
+I simulate 3 datasets with slow ($\beta = 0.5$), medium ($\beta = 1$), and fast ($\beta = 2$) transition speeds. I want the transitions to occur at the same $x$ for both datasets. The halfway transition points $h$ will be at `x= 10` and `x=15`. $h$ is calculated with cut points $c$ and transition speed $\beta$, that is $h = \frac{c}{\beta}$ So while the transition points will stay the same in each simulated dataset, the cut points will differ. 
 
 Cut points for the slow transition dataset will be at 5 and 7.5, at 10 and 15 for the medium and at 20 and 30 for the fast transition.
 
 Here is what the first transition between states looks like for those transitions. My data is more like the fast transition - a phenological period with transitions of beta=0.5 would be occuring over an unrealistically long time period.
 
-```{r transitions}
+```{r transitions, fig.height=3, fig.width=4}
 
 logistic2 <- function(x, beta, c) {
   y <- 1/(1+exp(-beta*x + c))
@@ -92,13 +95,13 @@ plot_simulated_data(simdat, simulation_input$inputlist)
 
 Now I want to try to recapture parameters.
 
-I need to know how good I have to be at choosing the shape and rate parameters for the gamma prior on the cutpoints to recapture the "true" slope and cut points parameters as well. The mean of the gamma is the shape divided by the rate.  
+I need to know how good I have to be at choosing the shape and rate parameters for the gamma prior on the cut points to recapture the "true" slope and cut points parameters as well. (The mean of the gamma is the shape divided by the rate.)  
 
-Choosing where to center the gamma isn't obvious since cut points are on that "abstract latent space." Since $c = \beta h$, though, we have some idea of what that is. $x=12.5$ is smack dab in the middle of our transition points, which we can roughly estimate from the data. It would be nice to be able to use this number that we know when choosing the parameters for the gamma prior. 
+Choosing where to center the gamma isn't obvious since cut points are on that "abstract latent space." Since $c = \beta h$, though, we have some idea of what that is. $x=12.5$ is smack dab in the middle of our transition points $h$, which we can roughly estimate from the data. It would be nice to be able to use this number that we know when choosing the parameters for the gamma prior. 
 
-If we center a gamma distribution on state 2, how much wiggle room does it need to find the cut points? When $\beta=0.5$, 12.5 is 6.25 on the abstract latent space and when $\beta=2$ 12.5 is 25 on the abstract latent space. The larger beta is, the bigger and further apart the cut points are. The smaller beta is, the smaller and closer together the cutpoints are. Since we don't know $\beta$ in advance, a fat gamma will probably work better than a skinny gamma.
+If we center a gamma distribution on state `2`, how much wiggle room does it need to find the cut points? When $\beta=0.5$, `12.5` is `6.25` on the cut point space and when $\beta=2$, `12.5` is `25` on the abstract latent space. The larger $\beta$ is, the bigger and further apart the cut points are. The smaller $\beta$ is, the smaller and closer together the cut points are. Since we don't know $\beta$ in advance, we probably have to choose a fat gamma so we can access the full range of values where cut points could be. On the other hand, we might end up estimating combinations of $c$ and $\beta$ that get $h$ right, but both $c$ and $\beta$ very wrong.
 
-I also want to understand how the exponential prior on beta affects the ability to recapture parameters. I'll try rates of 1,2,3.
+I also want to understand how the exponential prior on $\beta$ affects the ability of the model to recapture parameters. I'll try rates of 1,2,3.
 
 
 ### Gamma prior with covariate
@@ -106,20 +109,22 @@ I also want to understand how the exponential prior on beta affects the ability 
 
 beta_rate <- c(1:3) # rate parameters for exponential prior on beta
 
-# shape and rate parameters for gamma prior on cutpoints, all centered on mean transition point
+# shape and rate parameters for gamma prior on cut points, all centered on mean transition point
 
-factors <- list(fat=0.10, average=0.25, skinny=1)
+factors <- list(fat=0.10, middling=0.25, skinny=1)
 
 pars_gamma <- purrr::map(factors, make_gamma_pars, h=simulation_input$h)  
 
-# format for plotting andplot gamma priors
+#plot gamma priors
 pars_gamma %>%
+  # format for plotting
   map(function(x) {rgamma(1000, x$shape, x$cut_rate)}) %>%
   bind_cols() %>%
   tidyr::pivot_longer(cols = names(factors)) %>%
+  # plot
   ggplot(aes(x=value, fill=name)) +
-  geom_density() +
-  facet_grid(name ~ .) +
+  geom_density(alpha=0.5) +
+ # facet_grid(name ~ .) +
   ggtitle("Gamma priors all centered on 10", subtitle = "with different shape and rate params")
 
 
