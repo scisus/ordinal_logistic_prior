@@ -136,9 +136,6 @@ parframe_gam <- pars_gamma %>%
 parframe_gam$h1 <- simulation_input$h[1]
 parframe_gam$h2 <- simulation_input$h[2]
 parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
-
-
-knitr::kable(parframe_gam, caption="model parameterizations used to try to recapture params")
 ```
 
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
@@ -147,7 +144,8 @@ So there are 3 simulated datasets - 1 for each of three transition speeds. I'm g
 knitr::kable(parframe_gam, caption="Model parameterizations used to try to recapture params")
 ```
 
-```{r GammaRecapture, include=FALSE, cache=TRUE}
+
+```{r GammaRecapture, include=FALSE, cache=TRUE, warning=TRUE}
 # Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
 
 # format parframe so it works with parLapply better
@@ -165,45 +163,60 @@ parallel::clusterExport(cl, c("fit_gamma_model", "parlist_gam", "simdat"))
 parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 
 # fit the models
-gammafits <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
+# run each model 30 times
+fits_gam_list <- list()
+reps <- 30
+
+for (i in 1:2) {
+  fits_gam <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
+  fits_gam_list[[i]] <- fits_gam
+}
 
 parallel::stopCluster(cl) #close the cluster
 
 ```
+### Model check
+Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
+```{r modelcheck}
+
+bad_models <- map_dfr(fits_gam_list, check_list_of_models, .id = ".id") %>%
+  rename(iteration = .id) %>%
+  mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
+  filter(all_bads > 0) %>%
+  select(-all_bads) %>%
+  group_by(modelid) %>%
+  summarize(bad_proportion = n()/reps)
+
+knitr::kable(bad_models, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1")
+
+```
 
 ```{r gammaExtract}
-# extract params
-paramsgam <- lapply(gammafits,
-                    function(x) {data.frame(rstan::extract(x) ) } )
-#param summary
-sum_gam <- lapply(paramsgam, summary)
 
-#bind true and model pars even tho it will make a giant df
+# extract parameters from stan objects pair with true
+#params_gam <- bind_true_model_pars(fits_gam, parlist_gam)
+params_gam <- map(fits_gam_list, bind_true_model_pars, parlist=parlist_gam)
 
-paramsgam <- map(paramsgam, label_names, label="model")
-parlist_gam <- map(parlist_gam, label_names, label="true")
-
-paramsgam <- map2(paramsgam, parlist_gam, cbind)
 ```
 
 ```{r gammaParPlots, fig.height=2}
 #plot params and diffs
 #map(paramsgam, parplot)
-map(paramsgam, posterior_differencer) %>%
-    map2(.y=paramsgam, .f=diffplotter)
+# map(paramsgam, posterior_differencer) %>%
+#     map2(.y=paramsgam, .f=diffplotter)
 ```
 
+### Recapture
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
 ```{r GammaHDPI}
 # calculate whether true value is in HPDI
+# MAKE THIS WORK WITH A LIST OF LISTS
+in50 <- map(params_gam, calc_HPDI, prob=0.5)
 
+in75 <- map(params_gam, calc_HPDI, prob=0.75)
 
-in50 <- map(paramsgam, calc_HPDI, prob=0.5)
-
-in75 <- map(paramsgam, calc_HPDI, prob=0.75)
-
-in90 <- map(paramsgam, calc_HPDI, prob=0.90)
+in90 <- map(params_gam, calc_HPDI, prob=.90)
 
 # recaptured parameters
 perform50 <- map_df(in50, bind_rows, .id="modelid") %>%
@@ -213,37 +226,39 @@ perform90 <- map_df(in90, bind_rows, .id = "modelid") %>%
   dplyr::mutate(modelid=as.integer(modelid)) %>%
   full_join(parframe_gam)
 
-# proportion recaptured parameters
+# proportion of parameters recaptured
 prop_recaptured50 <- perform50 %>%
   group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
+  summarise(captured = sum(inint)) %>%
   full_join(parframe_gam) %>%
-  arrange(beta, desc(all_captured))
+  arrange(beta, desc(captured))
 
 prop_recaptured90 <- perform90 %>%
   group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
+  summarise(captured = sum(inint)) %>%
   full_join(parframe_gam) %>%
-  arrange(beta, desc(all_captured))
+  arrange(beta, desc(captured))
 
 #knitr::kable(prop_recaptured50, caption = "Proportion of params recaptured in 50% HPDI")
 #knitr::kable(prop_recaptured90, caption = "Proportion of params recaptured in 90% HPDI")
 ```
 
 ```{r plotGammaRecaptureoverall}
-ggplot(prop_recaptured50, aes(x=as.factor(shape), y=as.factor(beta_rate), fill=all_captured)) + 
+ggplot(prop_recaptured50, aes(x=gammaid, y=as.factor(beta_rate), fill=captured)) + 
   geom_tile(colour="white") +
-  geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
+  geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI") +
-  scale_fill_gradient(low="white", high="steelblue")
+  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,1)) +
+  ylab("beta_rate")
 
-ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=all_captured)) + 
+ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=captured)) + 
   geom_tile(colour="white") +
-  geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
+  geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI") +
-  scale_fill_gradient(low="white", high="violetred")
+  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,1)) +
+  ylab("beta_rate")
 ```
 
 Most models return all parameters in the 90% HPDI, but a skinny gamma prior makes it harder to return parameters, especially when $\beta$ deviates from 1. 
@@ -251,6 +266,32 @@ Most models return all parameters in the 90% HPDI, but a skinny gamma prior make
 Which parameters are easier or harder to recapture?
 
 
+
+```{r plotGammaRecapture}
+#knitr::kable(perform50, caption = "Ability of the different models to recapture parameters in 50% HPDI. Each model only run only once.")
+
+ggplot(perform50, aes(x=params, y=as.factor(modelid), fill=inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_d()  +
+  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("beta", scales="free") +
+  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("model id")
+  
+
+#knitr::kable(perform90, caption = "Ability of the different models to recapture parameters in 90% HPDI. Each model only run only once, don't shoot me.")
+
+ggplot(perform90, aes(x=params, y=as.factor(modelid), fill=inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_d()  +
+  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("beta", scales="free") +
+  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("modelid")
+
+```
 
 A skinny gamma prior centered in between the transition points doesn't work unless the slope is near one (putting the mean of the transition points and the mean of the cutpoints in the same ballpark). (See models 24, 15, 6)
 
@@ -261,6 +302,10 @@ All parameters except the second transition point ($h2$) are recaptured in the 9
 $h$ is *never* recaptured in the 50% HPDI, and, while $h1$ is recaptured in all 90% HPDIs, $h2$ never is. That's a bummer, since that's what I actually want to know. Also, how can $c_2$ and $\beta$ be captured, but $h_2$ not be when $h_2 = \frac{c_2}{\beta}$?
 
 The best choices for your prior parameters in this situation is a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
+
+```{r plotGammaParams, fig.height=2}
+map(params_gam[c(1, 5, 11, 15, 21, 22, 23)], parplot)
+```
 
 ### Dirichlet prior with covariate
 
