@@ -185,7 +185,7 @@ bad_models <- map_dfr(fits_gam_list, check_list_of_models, .id = ".id") %>%
   filter(all_bads > 0) %>%
   select(-all_bads) %>%
   group_by(modelid) %>%
-  summarize(bad_proportion = n()/reps)
+  summarize(bad_proportion = n()/reps, bad_count = n())
 
 knitr::kable(bad_models, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1")
 
