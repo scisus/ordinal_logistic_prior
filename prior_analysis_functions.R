@@ -124,7 +124,7 @@ fit_gamma_model <- function(simdatlist, pars, groups) {
     if (isTRUE(groups)) {
         fitgam <- stan(file='gamma/gamma_covar_group.stan', data=simdat, chains=4, iter = 3500, warmup=1000)
     } else {
-        fitgam <- stan(file='gamma/gamma_covar.stan', data=simdat, chains=4, iter=20, warmup=10)
+        fitgam <- stan(file='gamma/gamma_covar.stan', data=simdat, chains=4)
     }
     return(fitgam)
 }
@@ -154,7 +154,7 @@ check_list_of_models <- function(model_list) {
         rename(modelid=.id)
 }
 
-#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
+#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df
 bind_true_model_pars <- function(fits, parlist) {
     # extract params from model object
     params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
@@ -180,25 +180,32 @@ HPDIhigh <- function(x, prob) {
 }
 
 calc_HPDI <- function(params, prob) {
-    low <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIlow, prob=prob)
-    high <- params %>% dplyr::summarise_at(vars(ends_with("model")), HPDIhigh, prob=prob)
+    params <- params %>%
+        tidyr::pivot_longer(ends_with("model"), names_to = "param", values_to = "param_value") %>%
+        filter(param != "lp___model") %>%
+        tidyr::separate(param, into="param", sep="_") %>% # drop model ending
+        rename(modelid=modelid_true)
     
-    # awkward formatting
-    hdpis <- dplyr::full_join(low, high) %>%
-        select(-contains("lp"))
-    colnames(hdpis) <- stringr::str_replace(colnames(hdpis), "_model", "")
+    # calculate bottom and top of HPDI at prob for each model run and each parameter
+    low <- params %>% 
+        group_by(modelid, run, param) %>%
+        summarise(low= HPDIlow(param_value, prob=prob))
+    high <- params %>% 
+        group_by(modelid, run, param) %>%
+        summarise(high= HPDIhigh(param_value, prob=prob))
     
-    # true param
-    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique)
+
+    hdpis <- dplyr::full_join(low, high)
+    
+    # true params
+    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique) 
     colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
-    true <- select(true, colnames(hdpis))
+    true <- select(true, c("c.1", "c.2", "beta", "h1", "h2")) %>%
+        tidyr::pivot_longer(cols=c("c.1", "c.2", "beta", "h1", "h2"), names_to = "param", values_to="true")
     
-    # more awkward formatting
-    compframe <- dplyr::full_join(hdpis, true) %>%
-        t(.) %>%
-        data.frame()
-    colnames(compframe) <- c("low", "high", "true")
-    compframe$params <- rownames(compframe)
+    # combine true and hdpis for comparison
+    compframe <- full_join(hdpis, true)
+ 
     
     # true param in interval?
     tf <- compframe %>% mutate(inint = true > low & true < high)
