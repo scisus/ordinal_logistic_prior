@@ -308,15 +308,30 @@ ggplot(perform90_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) +
 
 ```
 
-A skinny gamma prior centered in between the transition points doesn't work unless the slope is near one (putting the mean of the transition points and the mean of the cutpoints in the same ballpark). (See models 24, 15, 6)
+$\beta$ and $c$ are never recaptured in the 50% HPDI when the real $\beta$ is slow, but they are usually recaptured in the 90% HPDI, except when the gamma prior on cutpoints is skinny.
 
-A fast transition underlying speed in the data combined with a fat gamma prior on the cutpoints and a very loose prior on beta make it harder to recapture parameters (see model 1).
+A skinny gamma prior centered in between the transition points makes it difficult to recapture $\beta$ and $c$ across the board, unless $\beta$ is near 1 (See models 3,6,9, 21, 24, 27). 
 
-All parameters except the second transition point ($h2$) are recaptured in the 90% HPDI. 
+$beta_rate$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $beta_rate$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
 
-$h$ is *never* recaptured in the 50% HPDI, and, while $h1$ is recaptured in all 90% HPDIs, $h2$ never is. That's a bummer, since that's what I actually want to know. Also, how can $c_2$ and $\beta$ be captured, but $h_2$ not be when $h_2 = \frac{c_2}{\beta}$?
+#### $h$
 
-The best choices for your prior parameters in this situation is a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
+Both $h$ are always captured in the 90% HPDI, even when $\beta$ and $c$ are not recaptured. So the *ratio* between $\beta$ and $c$ is being captured, even when the actual values of those parameters aren't.
+
+$h_2$ is estimated best (*i.e* in 50% HPDI) when transitions are fast and $h_1$ is estimated best when transitions are slow. 
+
+Good estimates for $\beta$ and $c$ are correlated with worse estimates for $h$. This is a concerning tradeoff.
+
+#### Best prior parameter choices
+
+Fat to middling gamma shape. 
+
+Beta rate doesn't matter that much, but 2 works best.
+
+Assume centered between transitions because that's all I tried. Could also try centering it closer to one transition or the other, or changing skew. 
+
+The best choices for your prior parameters in this situation are a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
+
 ```{r plotGammaParams, fig.height=3, fig.width=4}
 
 map(params_gam[sample(1:30, 5)], parplot) # pick 5 models at random to plot
