@@ -60,20 +60,7 @@ label_names <- function(x, label) {
     return(x)
 }
 
-#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
-bind_true_model_pars <- function(fits, parlist) {
-    # extract params from model object
-    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
 
-    # label params as coming from the model or as true params used to
-    params <- map(params, label_names, label="model")
-    parlist <- map(parlist, label_names, label="true")
-
-    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
-    params <- map2(params, parlist, cbind)
-
-    return(params)
-}
 
 ## append a label (string) to all columnnames in a dataframe (x)
 label_names <- function(x, label) {
