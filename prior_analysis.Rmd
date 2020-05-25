@@ -143,7 +143,7 @@ parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
 
 ```{r paramsTableGamma}
-knitr::kable(parframe_gam, caption="Model parameterizations used to try to recapture params")
+knitr::kable(parframe_gam, caption="Model parameterizations used to try to recapture params - gamma")
 ```
 
 
@@ -173,7 +173,7 @@ for (i in 1:reps) {
  # fits_gam_list[[i]] <- fits_gam
  saveRDS(fits_gam, file = paste0("gamma/covar_runs/run", i, ".rds"))
  rm(fits_gam) # how much ram do you think you have? Don't crash everything.
- gc()
+ gc() # clean your room 
 }
 
 parallel::stopCluster(cl) #close the cluster
