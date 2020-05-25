@@ -38,6 +38,8 @@ When I modelled phenology using an ordinal logistic model, I used
 * an exponential distribution distribution for the transition speed/slope, $\beta$
     * normal distributions for group effects on the slope
 
+Was this even a good idea?
+
 Normally, priors are bottom up - you choose a prior distribution for each parameter in your model. This is tricky for the cut points in an ordinal logistic model because they're defined on an abstract latent space where your domain expertise doesn't really apply. But you really want to choose a good prior in ordinal logistic models, because ordinal logistic models with covariates are inherently non-identifiable. (Because $\beta$ and $c$ depend on one another.)
 
 Betancourt says that
@@ -314,7 +316,7 @@ A skinny gamma prior centered in between the transition points makes it difficul
 
 $beta_rate$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $beta_rate$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
 
-#### $h$
+#### Half transition points $h$
 
 Both $h$ are always captured in the 90% HPDI, even when $\beta$ and $c$ are not recaptured. So the *ratio* between $\beta$ and $c$ is being captured, even when the actual values of those parameters aren't.
 

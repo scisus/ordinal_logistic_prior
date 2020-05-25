@@ -1,32 +1,16 @@
 ---
-title: "Gamma priors on cutpoints in an ordinal logistic model"
+title: "Induced dirichlet priors on cutpoints in an ordinal logistic model"
 author: "Susannah Tysor"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
-```{r packages}
-library(purrr)
-library(dplyr)
-library(ggplot2)
-library(bayesplot)
-library(rstan)
-```
-```{r options}
-rstan_options(auto_write=TRUE)
-```
-```{r depends}
-source('prior_analysis_functions.R')
-```
+Let's repeat this analysis using an induced dirichlet prior on cutpoints. I'll use the same simulated data as above.
 
-```{r simulate_data}
+I'll test the same $beta_{rate}$ parameters as above. I'll also vary the anchor parameter in the induced dirichlet prior.
 
-simulation_input <- set_simulation_parameters()
+In his example, Betancourt sets the anchor to 0. I don't completely understand how the anchor works, so I'll try 5 and 10 as well and see what happens.
 
-simdat <- map(simulation_input$inputlist, simulate_data, groups=FALSE)
-
-plot_simulated_data(simdat, simulation_input$inputlist)
-```
 ```{r set_dirichlet_priors}
 
 beta_rate <- c(1:3) # rate parameters for exponential prior on beta
