@@ -119,7 +119,7 @@ fit_gamma_model <- function(simdatlist, pars, groups) {
     simdat$shape <- pars$shape
     simdat$cut_rate <- pars$cut_rate
     simdat$beta_rate <- pars$beta_rate
-    
+
     #fit the model
     if (isTRUE(groups)) {
         fitgam <- stan(file='gamma/gamma_covar_group.stan', data=simdat, chains=4, iter = 3500, warmup=1000)
@@ -127,6 +127,31 @@ fit_gamma_model <- function(simdatlist, pars, groups) {
         fitgam <- stan(file='gamma/gamma_covar.stan', data=simdat, chains=4)
     }
     return(fitgam)
+}
+
+# fit a model with an induced dirichlet prior on cutpoints in stan. simdatlist is a list of simulated data (1 simulated dataset per list entry), pars is a list of parameter values (1 set of parameter values per list entry) and groups is TRUE or FALSE indicating whether you're trying to fit groups.
+fit_indir_model <- function(simdatlist, pars, groups) {
+    #choose whether to use data simulated with a rapid or slow transition
+    if (pars$transition == "slow") {
+        simdat <- simdatlist$slow
+    }
+    if (pars$transition == "medium") {
+        simdat <- simdatlist$medium
+    }
+    if (pars$transition == "fast") {
+        simdat <- simdatlist$fast
+    }
+    #extract parameters for prior distribtuions
+    simdat$anchor <- pars$anchor
+    simdat$beta_rate <- pars$beta_rate
+
+    #fit the model
+    if (isTRUE(groups)) {
+        fitindir <- stan(file='induced_dirichlet/dirichlet_covar_group.stan', data=simdat, chains=4, iter = 3500, warmup=1000)
+    } else {
+        fitindir <- stan(file='induced_dirichlet/dirichlet_covar.stan', data=simdat, chains=4)
+    }
+    return(fitindir)
 }
 
 ## append a label (string) to all columnnames in a dataframe (x)
@@ -158,7 +183,7 @@ check_list_of_models <- function(model_list) {
 bind_true_model_pars <- function(fits, parlist) {
     # extract params from model object
     params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
-    
+
     # label params as coming from the model or as true params used to
     params <- map(params, label_names, label="model")
     parlist <- map(parlist, label_names, label="true")
@@ -175,7 +200,7 @@ extract_pars_and_problems <- function(path) {
     reps <- length(fits)
     pars <- list()
     bad_models <- list()
-    
+
     for (i in 1:reps) {
         run <- readRDS(paste0(path, fits[i])) # read in first run of 27 models
         run_pars <- bind_true_model_pars(run, parlist=parlist_gam)
@@ -188,7 +213,7 @@ extract_pars_and_problems <- function(path) {
         rm(run, run_pars, run_fit)
         gc()
     }
-    
+
     return(list(pars = pars, problems = bad_models))
 }
 
@@ -208,32 +233,32 @@ calc_HPDI <- function(params, prob) {
         filter(param != "lp___model") %>%
         tidyr::separate(param, into="param", sep="_") %>% # drop model ending
         rename(modelid=modelid_true)
-    
+
     # calculate bottom and top of HPDI at prob for each model run and each parameter
-    low <- params %>% 
+    low <- params %>%
         group_by(modelid, run, param) %>%
         summarise(low= HPDIlow(param_value, prob=prob))
-    high <- params %>% 
+    high <- params %>%
         group_by(modelid, run, param) %>%
         summarise(high= HPDIhigh(param_value, prob=prob))
-    
+
 
     hdpis <- dplyr::full_join(low, high)
-    
+
     # true params
-    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique) 
+    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique)
     colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
     true <- select(true, c("c.1", "c.2", "beta", "h1", "h2")) %>%
         tidyr::pivot_longer(cols=c("c.1", "c.2", "beta", "h1", "h2"), names_to = "param", values_to="true")
-    
+
     # combine true and hdpis for comparison
     compframe <- full_join(hdpis, true)
- 
-    
+
+
     # true param in interval?
     tf <- compframe %>% mutate(inint = true > low & true < high)
     return(tf)
-    
+
 }
 
 # function to plot modeled parameters with label being a string to label the graph (usually prior and whether groups were included and pardf is the modeled parameter dataframe) trueparams is a one row dataframe of true parameters. h is a global parameter have fun!
@@ -241,10 +266,10 @@ calc_HPDI <- function(params, prob) {
 #     pars <- dplyr::select(pars, starts_with("c"), starts_with("beta"), starts_with("h"), starts_with("modelid")) # drop character cols
 #     cutplot <- mcmc_areas(pars, regex_pars="c.\\d_model") +
 #         geom_vline(xintercept=c(unique(pars$c.1_true), unique(pars$c.2_true)))
-#     
+#
 #     betaplot <- mcmc_areas(pars, pars="beta_model") +
 #         geom_vline(xintercept=unique(pars$beta_true))
-#     
+#
 #     h1plot <- mcmc_areas(pars, regex_pars = "h1_model") +
 #         geom_vline(xintercept=unique(pars$h1_true))
 #     h2plot <- mcmc_areas(pars, regex_pars = "h2_model") +

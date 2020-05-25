@@ -11,7 +11,7 @@ I'll test the same $beta_{rate}$ parameters as above. I'll also vary the anchor 
 
 In his example, Betancourt sets the anchor to 0. I don't completely understand how the anchor works, so I'll try 5 and 10 as well and see what happens.
 
-```{r set_dirichlet_priors}
+```{r paramsForInducedDirichletModels}
 
 beta_rate <- c(1:3) # rate parameters for exponential prior on beta
 anchor <- c(0, 5, 10) # different anchor parameters for induced dirichlet prior
@@ -25,6 +25,12 @@ parframe_indir <- merge(simulation_input$pars, y=beta_rate) %>%
     mutate(h1 = simulation_input$h[1], h2 = simulation_input$h[2])
 parframe_indir$modelid <- 1:nrow(parframe_indir)
     
+```
+
+I'm going to fit all three simulated datasets with each of the 3 rate prior parameters on beta and anchor parameters on the cutpoints.
+
+``````{r paramsTableGamma}
+knitr::kable(parframe_indir, caption="Model parameterizations used to try to recapture params - induced dirichlet")
 ```
 
 ```{r recapture_parameters}
@@ -41,7 +47,16 @@ cl <- parallel::makeCluster(no_cores)
 parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat"))
 parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 
-indirfits <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat, pars=x, groups=FALSE)})
+# fit the models
+## run each model x times
+reps <- 2
+
+for (i in 1:reps) {
+  fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat, pars=x, groups=FALSE)})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/indir_runs/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
+}
 
 parallel::stopCluster(cl) #close the cluster
 
