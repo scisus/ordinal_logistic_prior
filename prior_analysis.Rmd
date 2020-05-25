@@ -30,24 +30,27 @@ rstan_options(auto_write=TRUE)
 
 ## Prior choice
 
-Michael Betancourt thinks that an induced dirichlet prior may be a [good choice](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) for ordinal logistic models.
+Michael Betancourt thinks that an [induced dirichlet prior](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) on the cut points may be a good choice for ordinal logistic models.
 
 When I modelled phenology using an ordinal logistic model, I used
 
-* a gamma distribution for the prior on the cut points
-* an exponential distribution distribution for the transition speed/slope $\beta$
+* a gamma distribution for the prior on the cut points, $c$
+* an exponential distribution distribution for the transition speed/slope, $\beta$
     * normal distributions for group effects on the slope
 
-Normally, priors are bottom up - you choose a distribution for each prior. This is tricky for the cutpoints in an ordinal logistic model because they're defined on an abstract latent space so you can't easily use your domain expertise, but a good prior is incredibly important in these models, because ordinal logistic models with covariates are inherently non-identifiable. (Because $beta$s and cut points depend on one another.)
+Normally, priors are bottom up - you choose a prior distribution for each parameter in your model. This is tricky for the cut points in an ordinal logistic model because they're defined on an abstract latent space where your domain expertise doesn't really apply. But you really want to choose a good prior in ordinal logistic models, because ordinal logistic models with covariates are inherently non-identifiable. (Because $\beta$ and $c$ depend on one another.)
 
 Betancourt says that
+
 > To avoid the non-identifiability of the interior cut points from propagating to the posterior distribution we need a principled prior model that can exploit domain expertise to consistently regularize all of the internal cut points at the same time. Regularization of the cut points, however, is subtle given their ordering constraint. Moreover domain expertise is awkward to apply on the abstract latent space where the internal cut points are defined.
+
+He develops an induced dirichlet prior on the cut points. I want to compare the induced dirichlet and gamma priors on cut points for my situation. 
 
 If I simulate data like mine using an ordinal logistic model, can I recapture the parameters using an ordinal logistic model with a gamma or induced dirichlet prior on the cut points?
 
-I don't actually care about recapturing the cut points or beta. I do care about recapturing the transition points, $h$, though. 
+At this point, I don't actually care about recapturing the cut points or beta. I do care about recapturing the transition points, $h$, though. $h$ are the points at which half of the population has transitioned from one state to another and is calculated as $h = \frac{c}{\beta}$. Eventually I will want to consider how different groups affect $h$ through deviations from the main slope $\beta$ (*e.g* $h = \frac{c}{\beta + \beta_{group_i}}$) and so estimating $\beta$s well might be more important then. But for now, let's just consider a an ordinal logistic model with a covariate/latent effect and no groups.
 
-# Goals
+## Goals
 1) When can I recapture parameters with a gamma prior?
 2) When can I recapture parameters with an induced dirichlet prior?
 3) Which one works best?
@@ -55,15 +58,15 @@ I don't actually care about recapturing the cut points or beta. I do care about 
 # Simulate data
 First let's simulate some data that's kind of like mine.
 
-I have three potential states `K` and a latent effect/covariate `x`. `x` is always positive and measurements are only made when `x` is between 8 and 18. Data collection begins when workers notice trees are approaching state 2 and stops as trees enter state 3.
+I have three potential states $K$ and a latent effect/covariate $x$. $x$ is always positive and measurements are only made when $x$ is between `8` and `18`. Data collection begins when workers notice trees are approaching state `2` and stops as trees enter state `3`.
 
-I simulate 3 datasets with slow ($\beta = 0.5$), medium ($\beta = 1$), and fast ($\beta = 2$) transition speeds  and one with a slow transition speed . I want the transitions to occur at the same `x` for both datasets. The halfway transition points `h` will be at `x= 10` and `x=15`. $h$ is calculated with cut points $c$ and transition speed $\beta$ - $h = \frac{c}{\beta}$ So while the transition points will stay the same in each simulated dataset, the cut points will differ. 
+I simulate 3 datasets with slow ($\beta = 0.5$), medium ($\beta = 1$), and fast ($\beta = 2$) transition speeds. I want the transitions to occur at the same $x$ for both datasets. The halfway transition points $h$ will be at `x= 10` and `x=15`. $h$ is calculated with cut points $c$ and transition speed $\beta$, that is $h = \frac{c}{\beta}$ So while the transition points will stay the same in each simulated dataset, the cut points will differ. 
 
 Cut points for the slow transition dataset will be at 5 and 7.5, at 10 and 15 for the medium and at 20 and 30 for the fast transition.
 
 Here is what the first transition between states looks like for those transitions. My data is more like the fast transition - a phenological period with transitions of beta=0.5 would be occuring over an unrealistically long time period.
 
-```{r transitions}
+```{r transitions, fig.height=3, fig.width=4}
 
 logistic2 <- function(x, beta, c) {
   y <- 1/(1+exp(-beta*x + c))
@@ -92,13 +95,13 @@ plot_simulated_data(simdat, simulation_input$inputlist)
 
 Now I want to try to recapture parameters.
 
-I need to know how good I have to be at choosing the shape and rate parameters for the gamma prior on the cutpoints to recapture the "true" slope and cut points parameters as well. The mean of the gamma is the shape divided by the rate.  
+I need to know how good I have to be at choosing the shape and rate parameters for the gamma prior on the cut points to recapture the "true" slope and cut points parameters as well. (The mean of the gamma is the shape divided by the rate.)  
 
-Choosing where to center the gamma isn't obvious since cut points are on that "abstract latent space." Since $c = \beta h$, though, we have some idea of what that is. $x=12.5$ is smack dab in the middle of our transition points, which we can roughly estimate from the data. It would be nice to be able to use this number that we know when choosing the parameters for the gamma prior. 
+Choosing where to center the gamma isn't obvious since cut points are on that "abstract latent space." Since $c = \beta h$, though, we have some idea of what that is. $x=12.5$ is smack dab in the middle of our transition points $h$, which we can roughly estimate from the data. It would be nice to be able to use this number that we know when choosing the parameters for the gamma prior. 
 
-If we center a gamma distribution on state 2, how much wiggle room does it need to find the cut points? When $\beta=0.5$, 12.5 is 6.25 on the abstract latent space and when $\beta=2$ 12.5 is 25 on the abstract latent space. The larger beta is, the bigger and further apart the cut points are. The smaller beta is, the smaller and closer together the cutpoints are. Since we don't know $\beta$ in advance, a fat gamma will probably work better than a skinny gamma.
+If we center a gamma distribution on state `2`, how much wiggle room does it need to find the cut points? When $\beta=0.5$, `12.5` is `6.25` on the cut point space and when $\beta=2$, `12.5` is `25` on the abstract latent space. The larger $\beta$ is, the bigger and further apart the cut points are. The smaller $\beta$ is, the smaller and closer together the cut points are. Since we don't know $\beta$ in advance, we probably have to choose a fat gamma so we can access the full range of values where cut points could be. On the other hand, we might end up estimating combinations of $c$ and $\beta$ that get $h$ right, but both $c$ and $\beta$ very wrong.
 
-I also want to understand how the exponential prior on beta affects the ability to recapture parameters. I'll try rates of 1,2,3.
+I also want to understand how the exponential prior on $\beta$ affects the ability of the model to recapture parameters. I'll try rates of 1,2,3.
 
 
 ### Gamma prior with covariate
@@ -106,22 +109,23 @@ I also want to understand how the exponential prior on beta affects the ability 
 
 beta_rate <- c(1:3) # rate parameters for exponential prior on beta
 
-# shape and rate parameters for gamma prior on cutpoints, all centered on mean transition point
+# shape and rate parameters for gamma prior on cut points, all centered on mean transition point
 
-factors <- list(fat=0.10, average=0.25, skinny=1)
+factors <- list(fat=0.10, middling=0.25, skinny=1)
 
 pars_gamma <- purrr::map(factors, make_gamma_pars, h=simulation_input$h)  
 
-# format for plotting andplot gamma priors
+#plot gamma priors
 pars_gamma %>%
+  # format for plotting
   map(function(x) {rgamma(1000, x$shape, x$cut_rate)}) %>%
   bind_cols() %>%
   tidyr::pivot_longer(cols = names(factors)) %>%
+  # plot
   ggplot(aes(x=value, fill=name)) +
-  geom_density() +
-  facet_grid(name ~ .) +
+  geom_density(alpha=0.5) +
+ # facet_grid(name ~ .) +
   ggtitle("Gamma priors all centered on 10", subtitle = "with different shape and rate params")
-
 
 # make a nice dataframe with all combinations params used to simulate data and model params used to try to recover those params
 parframe_gam <- pars_gamma %>%
@@ -130,18 +134,18 @@ parframe_gam <- pars_gamma %>%
   dplyr::rename(gammaid=.id, beta_rate=y) %>%
   merge(simulation_input$pars)
 parframe_gam$h1 <- simulation_input$h[1]
-parframe_gam$h2 <- simulation_input$h[1]
+parframe_gam$h2 <- simulation_input$h[2]
 parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
-
-
-knitr::kable(parframe_gam, caption="model parameterizations used to try to recapture params")
 ```
 
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
 
-As beta gets larger, cut points get smaller and cut points priors need to be able to "reach" small values. As beta gets smaller, cutpoints need to be able to "reach" larger values. 
+```{r paramsTableGamma}
+knitr::kable(parframe_gam, caption="Model parameterizations used to try to recapture params")
+```
 
-```{r GammaRecapture, include=FALSE, cache=TRUE}
+
+```{r GammaRecapture, include=FALSE, cache=TRUE, warning=TRUE}
 # Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
 
 # format parframe so it works with parLapply better
@@ -159,88 +163,180 @@ parallel::clusterExport(cl, c("fit_gamma_model", "parlist_gam", "simdat"))
 parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 
 # fit the models
-gammafits <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
+## run each model 30 times
+reps <- 30
+
+for (i in 1:reps) {
+  fits_gam <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
+ # fits_gam_list[[i]] <- fits_gam
+ saveRDS(fits_gam, file = paste0("gamma/covar_runs/run", i, ".rds"))
+ rm(fits_gam) # how much ram do you think you have? Don't crash everything.
+ gc()
+}
 
 parallel::stopCluster(cl) #close the cluster
 
 ```
 
+```{r readModels, warning=FALSE}
+
+# pull in parameters and info on divergences, etc from saved stanfit objects
+
+extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/")
+```
+### Model check
+Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
+
+```{r modelCheck}
+problems_gam <- extracts_gam$problems %>%
+  map_dfr(bind_rows, .id=".id") %>%
+  rename(run=.id) %>%
+  group_by(modelid) %>%
+  summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
+  
+knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1")
+
+```
+18/27 models had problems with Rhat or neff_ratio in 1-5 of the 30 model runs. No divergences ever though. 
+
 ```{r gammaExtract}
-# extract params
-paramsgam <- lapply(gammafits,
-                    function(x) {data.frame(rstan::extract(x) ) } )
-#param summary
-sum_gam <- lapply(paramsgam, summary)
 
-#bind true and model pars even tho it will make a giant df
+# extract parameters from stan objects and pair with true param values
+#params_gam <- bind_true_model_pars(fits_gam, parlist_gam)
+params_gam <- extracts_gam$pars %>%
+  map_dfr(bind_rows, .id = ".id") %>%
+  rename(run=.id) %>%
+  split(.$modelid)
 
-paramsgam <- map(paramsgam, label_names, label="model")
-parlist_gam <- map(parlist_gam, label_names, label="true")
-
-paramsgam <- map2(paramsgam, parlist_gam, cbind)
 ```
 
-```{r gammaParPlots, fig.height=2}
-#plot params and diffs
-#map(paramsgam, parplot)
-map(paramsgam, posterior_differencer) %>%
-    map2(.y=paramsgam, .f=diffplotter)
-```
+### Recapture
 
-```{r GammaHDPI}
+Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
+```{r GammaHDPI, message=FALSE, warning=FALSE}
 # calculate whether true value is in HPDI
 
+in50 <- map(params_gam, calc_HPDI, prob=0.5)
 
-in50 <- map(paramsgam, calc_HPDI, prob=0.5)
+in75 <- map(params_gam, calc_HPDI, prob=0.75)
 
-in75 <- map(paramsgam, calc_HPDI, prob=0.75)
-
-in90 <- map(paramsgam, calc_HPDI, prob=0.90)
+in90 <- map(params_gam, calc_HPDI, prob=.90)
 
 # recaptured parameters
-perform50 <- map_df(in50, bind_rows, .id="modelid") %>%
-  dplyr::mutate(modelid=as.integer(modelid)) %>%
+perform50 <- map_dfr(in50, bind_rows) %>%
   full_join(parframe_gam) 
-perform90 <- map_df(in90, bind_rows, .id = "modelid") %>%
-  dplyr::mutate(modelid=as.integer(modelid)) %>%
-  full_join(parframe_gam)
+perform90 <- map_dfr(in90, bind_rows) %>%
+  full_join(parframe_gam) 
 
-# proportion recaptured parameters
+# proportion of parameters recaptured
 prop_recaptured50 <- perform50 %>%
-  group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
+  group_by(modelid, run) %>%
+  summarise(captured = sum(inint)) %>%
+  summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
   full_join(parframe_gam) %>%
-  arrange(beta, desc(all_captured))
+  arrange(beta, desc(mean_captured))
 
 prop_recaptured90 <- perform90 %>%
-  group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
+  group_by(modelid, run) %>%
+  summarise(captured = sum(inint)) %>%
+  summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
   full_join(parframe_gam) %>%
-  arrange(beta, desc(all_captured))
+  arrange(beta, desc(mean_captured))
+
 
 #knitr::kable(prop_recaptured50, caption = "Proportion of params recaptured in 50% HPDI")
 #knitr::kable(prop_recaptured90, caption = "Proportion of params recaptured in 90% HPDI")
 ```
 
 ```{r plotGammaRecaptureoverall}
-ggplot(prop_recaptured50, aes(x=as.factor(shape), y=as.factor(beta_rate), fill=all_captured)) + 
+ggplot(prop_recaptured50, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
-  geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
+  geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI") +
-  scale_fill_gradient(low="white", high="steelblue")
+  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,5)) +
+  ylab("beta_rate")
 
-ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=all_captured)) + 
+ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
-  geom_text(aes(label=paste(cut_rate, beta_rate, sep=","))) +
+  geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI") +
-  scale_fill_gradient(low="white", high="violetred")
+  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,5)) +
+  ylab("beta_rate")
 ```
-Parameters are most likely to be recaptured when transitions are medium fast (beta=1), shape parameters are higher than cutpoints, and beta is not too constrained (low beta rate). However when transitions are fast (and cutpoints correspondingly larger, very high shape values do not work well.) Choosing shape values that center the gamma prior relatively near the second cutpoint seems to work best.
 
-This is tricky to do, however, without knowing beta - or having a lot of knowledge of your system.
+Most models return all parameters in the 90% HPDI, but a skinny gamma prior makes it harder to return parameters, especially when $\beta$ deviates from 1. 
 
+Parameters are recaptured better when transition speed is fast, as long as the cutpoints prior isn't too skinny.
+
+Which parameters are easier or harder to recapture?
+
+```{r plotGammaRecapture}
+#knitr::kable(perform50, caption = "Ability of the different models to recapture parameters in 50% HPDI. Each model only run only once.")
+#
+# proportion of the time each parameter is returned correctly
+
+perform50_summary <- perform50 %>%
+  group_by(modelid, gammaid, beta_rate, beta, param) %>%
+  summarise(prop_inint = mean(inint))
+
+perform90_summary <- perform90 %>%
+  group_by(modelid, gammaid, beta_rate, beta, param) %>%
+  summarise(prop_inint = mean(inint))
+
+ggplot(perform50_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("beta", scales="free") +
+  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("model id")
+  
+
+#knitr::kable(perform90, caption = "Ability of the different models to recapture parameters in 90% HPDI. Each model only run only once, don't shoot me.")
+
+ggplot(perform90_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("beta", scales="free") +
+  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("model id")
+
+```
+
+$\beta$ and $c$ are never recaptured in the 50% HPDI when the real $\beta$ is slow, but they are usually recaptured in the 90% HPDI, except when the gamma prior on cutpoints is skinny.
+
+A skinny gamma prior centered in between the transition points makes it difficult to recapture $\beta$ and $c$ across the board, unless $\beta$ is near 1 (See models 3,6,9, 21, 24, 27). 
+
+$beta_rate$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $beta_rate$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
+
+#### $h$
+
+Both $h$ are always captured in the 90% HPDI, even when $\beta$ and $c$ are not recaptured. So the *ratio* between $\beta$ and $c$ is being captured, even when the actual values of those parameters aren't.
+
+$h_2$ is estimated best (*i.e* in 50% HPDI) when transitions are fast and $h_1$ is estimated best when transitions are slow. 
+
+Good estimates for $\beta$ and $c$ are correlated with worse estimates for $h$. This is a concerning tradeoff.
+
+#### Best prior parameter choices
+
+Fat to middling gamma shape. 
+
+Beta rate doesn't matter that much, but 2 works best.
+
+Assume centered between transitions because that's all I tried. Could also try centering it closer to one transition or the other, or changing skew. 
+
+The best choices for your prior parameters in this situation are a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
+
+```{r plotGammaParams, fig.height=3, fig.width=4}
+
+map(params_gam[sample(1:30, 5)], parplot) # pick 5 models at random to plot
+
+```
 
 ### Dirichlet prior with covariate
 
@@ -261,9 +357,9 @@ diffplotter(model_params=paramsdir, priorgroups="induced dirichlet prior, no gro
 
 
 
-When the transition between states is relatively rapid, the dirichlet struggles a bit. It's really underestimating both cutpoints and beta - but getting the inflection points quite right. This occurs with a $\beta$ of exp(2) and 1. If the $\beta$ prior is too loose (exp(0.5)) or too tight (exp(4)), the induced dirichlet fails.
+When the transition between states is relatively rapid, the dirichlet struggles a bit. It's really underestimating both cut points and beta - but getting the inflection points quite right. This occurs with a $\beta$ of exp(2) and 1. If the $\beta$ prior is too loose (exp(0.5)) or too tight (exp(4)), the induced dirichlet fails.
 
-The anchor point in the dirichlet also really matters to cutpoint estimation. Anchors much lower than the first true cutpoint really push the cutpoint estimate down. Anchors closer to the midpoint of the true cutpoint do better at estimating cutpoints, but worse at estimating transitions.
+The anchor point in the dirichlet also really matters to cutpoint estimation. Anchors much lower than the first true cutpoint really push the cutpoint estimate down. Anchors closer to the midpoint of the true cutpoint do better at estimating cut points, but worse at estimating transitions.
 
 
 
@@ -292,10 +388,10 @@ ggarrange(pgam, pdir, ncol=1)
 
 ```
 
-Gamma prior model does underestimate both cutpoints and beta, but not as much as the dirichlet does. However, the inflection points/half transition points (h1 and h2) are maybe estimated a bit better by the dirichlet?
+Gamma prior model does underestimate both cut points and beta, but not as much as the dirichlet does. However, the inflection points/half transition points (h1 and h2) are maybe estimated a bit better by the dirichlet?
 
 ## Conclusions on gamma vs induced dirichlet
-For my case - where cutpoints and beta are positive and most data is likely to be collected around state 2.
+For my case - where cut points and beta are positive and most data is likely to be collected around state 2.
 
 
 
@@ -316,7 +412,7 @@ G = 7
 K = 3
 
 # parameters
-c <- c(3,7) # cutpoints
+c <- c(3,7) # cut points
 beta = 0.5
 
 # simulate individual group effects
@@ -398,7 +494,7 @@ On the one hand, this is not great from a model perspective. OTOH, these are pre
 
 ### These notes are for data simulated around an h based on the entire population, including groups
 
-Tail ESS errors with iter at 4000, increased to 5000. No more warnings. But how does estimation go? Still badly. Fails to distinguish between groups, overestimates beta, underestimates cutpoints.
+Tail ESS errors with iter at 4000, increased to 5000. No more warnings. But how does estimation go? Still badly. Fails to distinguish between groups, overestimates beta, underestimates cut points.
 
 
 ## Group effects about 1/4 the size of beta.
@@ -411,7 +507,7 @@ G = 7
 K = 3
 
 # parameters
-c <- c(5,10) # cutpoints
+c <- c(5,10) # cut points
 beta = 2
 
 # simulate individual group effects
@@ -466,11 +562,11 @@ pgam
 
 ```
 
-Model doesn't give any obvious warnings, but  it overestimates cutpoints, underestimates beta, and dramatically overestimates betags.
+Model doesn't give any obvious warnings, but  it overestimates cut points, underestimates beta, and dramatically overestimates betags.
 
 If I change the priors from `cutpoints ~ gamma(10,1)` to `gamma(5,1)` and reduce the sigma_group prior to `exp(5)` from `exp(4)`, it does the same.
 
-If I bump up cutpoints so that the covariate distribution isn't bumping up against 0, beta is underestimated and group betas really overestimated.
+If I bump up cut points so that the covariate distribution isn't bumping up against 0, beta is underestimated and group betas really overestimated.
 
 If I strongly constrain the sigma_group prior to `exp(10)`, it doesn't change anything.
 

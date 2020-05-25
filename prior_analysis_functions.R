@@ -103,11 +103,62 @@ make_parframe_list <- function(parframe) {
     return(parlist)
 }
 
-#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df.
+# fit a model with a gamma prior in stan. simdatlist is a list of simulated data (1 simulated dataset per list entry), pars is a list of parameter values (1 set of parameter values per list entry) and groups is TRUE or FALSE indicating whether you're trying to fit groups.
+fit_gamma_model <- function(simdatlist, pars, groups) {
+    #choose whether to use data simulated with a rapid or slow transition
+    if (pars$transition == "slow") {
+        simdat <- simdatlist$slow
+    }
+    if (pars$transition == "medium") {
+        simdat <- simdatlist$medium
+    }
+    if (pars$transition == "fast") {
+        simdat <- simdatlist$fast
+    }
+    #extract parameters for prior distribtuions
+    simdat$shape <- pars$shape
+    simdat$cut_rate <- pars$cut_rate
+    simdat$beta_rate <- pars$beta_rate
+    
+    #fit the model
+    if (isTRUE(groups)) {
+        fitgam <- stan(file='gamma/gamma_covar_group.stan', data=simdat, chains=4, iter = 3500, warmup=1000)
+    } else {
+        fitgam <- stan(file='gamma/gamma_covar.stan', data=simdat, chains=4)
+    }
+    return(fitgam)
+}
+
+## append a label (string) to all columnnames in a dataframe (x)
+label_names <- function(x, label) {
+    colnames(x) <- paste0(colnames(x), "_", label)
+    return(x)
+}
+
+# take a stan object and find out if there's anything egregiously wrong with it
+check_model <- function(stanobj) {
+    nuts <- nuts_params(stanobj)
+    divergences <- dplyr::filter(nuts, Parameter=="divergent__" & Value==1) %>%
+        nrow()
+    rhats <- rhat(stanobj)
+    bad_rhats <- sum(rhats > 1.01)
+    nefrats <- neff_ratio(stanobj)
+    bad_neff <- sum(nefrats < 0.1, is.nan(nefrats), na.rm=TRUE)
+    diagnostics <- data.frame(divergences = divergences, bad_rhats=bad_rhats, bad_neff=bad_neff)
+    return(diagnostics)
+}
+
+# run check_model on a list of models and add a column that names each row by the list name
+check_list_of_models <- function(model_list) {
+    map_dfr(model_list, check_model, .id=".id") %>%
+        rename(modelid=.id)
+}
+
+#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df
 bind_true_model_pars <- function(fits, parlist) {
     # extract params from model object
     params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
-
+    
     # label params as coming from the model or as true params used to
     params <- map(params, label_names, label="model")
     parlist <- map(parlist, label_names, label="true")
@@ -116,4 +167,113 @@ bind_true_model_pars <- function(fits, parlist) {
     params <- map2(params, parlist, cbind)
 
     return(params)
+}
+
+# Extract model configurations and the most obvious problems with fit/convergence from stanfit objects. Stanfit objects are in lists in .rds files saved in path. path is a string denoting the directory where the rds files are stored. Nothing other than .rds files with lists of stanfit objects should be stored in path.
+extract_pars_and_problems <- function(path) {
+    fits <- list.files(path=path)
+    reps <- length(fits)
+    pars <- list()
+    bad_models <- list()
+    
+    for (i in 1:reps) {
+        run <- readRDS(paste0(path, fits[i])) # read in first run of 27 models
+        run_pars <- bind_true_model_pars(run, parlist=parlist_gam)
+        run_fit <- check_list_of_models(run) %>%
+            mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
+            filter(all_bads > 0) %>%
+            select(-all_bads)
+        pars[[i]] <- run_pars
+        bad_models[[i]] <- run_fit
+        rm(run, run_pars, run_fit)
+        gc()
+    }
+    
+    return(list(pars = pars, problems = bad_models))
+}
+
+HPDIlow <- function(x, prob) {
+    HPDI <- rethinking::HPDI(x, prob=prob)
+    return(HPDI[1])
+}
+
+HPDIhigh <- function(x, prob) {
+    HPDI <- rethinking::HPDI(x, prob=prob)
+    return(HPDI[2])
+}
+
+calc_HPDI <- function(params, prob) {
+    params <- params %>%
+        tidyr::pivot_longer(ends_with("model"), names_to = "param", values_to = "param_value") %>%
+        filter(param != "lp___model") %>%
+        tidyr::separate(param, into="param", sep="_") %>% # drop model ending
+        rename(modelid=modelid_true)
+    
+    # calculate bottom and top of HPDI at prob for each model run and each parameter
+    low <- params %>% 
+        group_by(modelid, run, param) %>%
+        summarise(low= HPDIlow(param_value, prob=prob))
+    high <- params %>% 
+        group_by(modelid, run, param) %>%
+        summarise(high= HPDIhigh(param_value, prob=prob))
+    
+
+    hdpis <- dplyr::full_join(low, high)
+    
+    # true params
+    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique) 
+    colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
+    true <- select(true, c("c.1", "c.2", "beta", "h1", "h2")) %>%
+        tidyr::pivot_longer(cols=c("c.1", "c.2", "beta", "h1", "h2"), names_to = "param", values_to="true")
+    
+    # combine true and hdpis for comparison
+    compframe <- full_join(hdpis, true)
+ 
+    
+    # true param in interval?
+    tf <- compframe %>% mutate(inint = true > low & true < high)
+    return(tf)
+    
+}
+
+# function to plot modeled parameters with label being a string to label the graph (usually prior and whether groups were included and pardf is the modeled parameter dataframe) trueparams is a one row dataframe of true parameters. h is a global parameter have fun!
+# parplot <- function(pars) {
+#     pars <- dplyr::select(pars, starts_with("c"), starts_with("beta"), starts_with("h"), starts_with("modelid")) # drop character cols
+#     cutplot <- mcmc_areas(pars, regex_pars="c.\\d_model") +
+#         geom_vline(xintercept=c(unique(pars$c.1_true), unique(pars$c.2_true)))
+#     
+#     betaplot <- mcmc_areas(pars, pars="beta_model") +
+#         geom_vline(xintercept=unique(pars$beta_true))
+#     
+#     h1plot <- mcmc_areas(pars, regex_pars = "h1_model") +
+#         geom_vline(xintercept=unique(pars$h1_true))
+#     h2plot <- mcmc_areas(pars, regex_pars = "h2_model") +
+#         geom_vline(xintercept=unique(pars$h2_true))
+#     allplot <- cowplot::plot_grid(cutplot, betaplot, h1plot, h2plot,
+#                                   nrow=1, ncol=4,
+#                                   labels=paste("modelid =", unique(pars$modelid_true)))
+#     print(allplot)
+# }
+parplot <- function(modelpars) {
+p1 <- ggplot(modelpars, aes(x=beta_model, color=run)) +
+    geom_density()+
+    theme(legend.position="none") +
+    xlab("beta") +
+    geom_vline(xintercept = unique(modelpars$beta_true))
+
+p2 <- ggplot(modelpars, aes(x=c.1_model, color=run)) +
+    geom_density() +
+    geom_density(aes(x=c.2_model)) +
+    theme(legend.position="none") +
+    xlab("cutpoints") +
+    geom_vline(xintercept = c(unique(modelpars$c.1_true), unique(modelpars$c.2_true)))
+
+p3 <- ggplot(modelpars, aes(x=h1_model, color=run)) +
+    geom_density() +
+    geom_density(aes(x=h2_model)) +
+    theme(legend.position="none") +
+    xlab("transitions") +
+    geom_vline(xintercept = c(unique(modelpars$h1_true), unique(modelpars$h2_true)))
+
+cowplot::plot_grid(p1, p2, p3, labels=paste("model", modelpars$modelid_true))
 }
