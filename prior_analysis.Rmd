@@ -5,7 +5,7 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
-    ```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message=FALSE)
 ```
 
@@ -28,7 +28,6 @@ source('prior_analysis_functions.R')
 rstan_options(auto_write=TRUE)
 ```
 
-## Prior choice
 
 Michael Betancourt thinks that an [induced dirichlet prior](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) on the cut points may be a good choice for ordinal logistic models.
 
@@ -93,7 +92,7 @@ plot_simulated_data(simdat, simulation_input$inputlist)
 
 ```
 
-## Attempt to recapture parameters
+## Attempt to recapture parameters with a gamma prior on cutpoints
 
 Now I want to try to recapture parameters.
 
@@ -106,7 +105,6 @@ If we center a gamma distribution on state `2`, how much wiggle room does it nee
 I also want to understand how the exponential prior on $\beta$ affects the ability of the model to recapture parameters. I'll try rates of 1,2,3.
 
 
-### Gamma prior with covariate
 ```{r paramsForGammaModels}
 
 beta_rate <- c(1:3) # rate parameters for exponential prior on beta
@@ -138,6 +136,9 @@ parframe_gam <- pars_gamma %>%
 parframe_gam$h1 <- simulation_input$h[1]
 parframe_gam$h2 <- simulation_input$h[2]
 parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
+
+# format parframe so it works with parLapply better
+parlist_gam <- make_parframe_list(parframe_gam)
 ```
 
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
@@ -147,59 +148,61 @@ knitr::kable(parframe_gam, caption="Model parameterizations used to try to recap
 ```
 
 
-```{r GammaRecapture, include=FALSE, cache=TRUE, warning=TRUE}
-# Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
-
-# format parframe so it works with parLapply better
-parlist_gam <- make_parframe_list(parframe_gam)
-
-
-# run all models, parallelized
-
-# make a cluster using half your cores
-no_cores <- parallel::detectCores()/2
-cl <- parallel::makeCluster(no_cores)
-
-# export the stuff you need to run on the cluster
-parallel::clusterExport(cl, c("fit_gamma_model", "parlist_gam", "simdat"))
-parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
-
-# fit the models
-## run each model 30 times
-reps <- 30
-
-for (i in 1:reps) {
-  fits_gam <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
- # fits_gam_list[[i]] <- fits_gam
- saveRDS(fits_gam, file = paste0("gamma/covar_runs/run", i, ".rds"))
- rm(fits_gam) # how much ram do you think you have? Don't crash everything.
- gc() # clean your room 
-}
-
-parallel::stopCluster(cl) #close the cluster
+```{r GammaRecapture, include=FALSE, warning=TRUE, }
+# # Parallel code actually executes in parallel when running this chuck as a chunck with ctrl+shift+enter. It does not if you run it line by line. I don't know why. 
+# 
+# # run all models, parallelized
+# 
+# # make a cluster using half your cores
+# no_cores <- parallel::detectCores()/2
+# cl <- parallel::makeCluster(no_cores)
+# 
+# # export the stuff you need to run on the cluster
+# parallel::clusterExport(cl, c("fit_gamma_model", "parlist_gam", "simdat"))
+# parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
+# 
+# # fit the models
+# ## run each model 30 times
+# reps <- 30
+# 
+# for (i in 1:reps) {
+#   fits_gam <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
+#  # fits_gam_list[[i]] <- fits_gam
+#  saveRDS(fits_gam, file = paste0("gamma/covar_runs/run", i, ".rds"))
+#  rm(fits_gam) # how much ram do you think you have? Don't crash everything.
+#  gc() # clean your room 
+# }
+# 
+# parallel::stopCluster(cl) #close the cluster
 
 ```
 
-```{r readModels, warning=FALSE}
+```{r readGammaModels, warning=FALSE, cache=TRUE}
 
 # pull in parameters and info on divergences, etc from saved stanfit objects
 
-extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/")
+extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/", parlist=parlist_gam)
 ```
 ### Model check
 Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
 
-```{r modelCheck}
+```{r gammaModelCheck}
 problems_gam <- extracts_gam$problems %>%
   map_dfr(bind_rows, .id=".id") %>%
   rename(run=.id) %>%
   group_by(modelid) %>%
   summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
   
-knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1")
+knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1 - gamma")
 
 ```
-18/27 models had problems with Rhat or neff_ratio in 1-5 of the 30 model runs. No divergences ever though. 
+18/27 models had problems with Rhat or neff_ratio in 1-5 of the 30 model runs. No divergences ever though. That's not ideal
+
+[ADD A FILTER HERE SHOWING THE PARAM VALUES THAT DON'T CAUSE PROBLEMS]
+
+```{r gammaPrettyModels}
+
+```
 
 ```{r gammaExtract}
 
