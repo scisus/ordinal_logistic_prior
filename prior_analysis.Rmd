@@ -28,6 +28,11 @@ source('prior_analysis_functions.R')
 rstan_options(auto_write=TRUE)
 ```
 
+```{r global}
+# each version of a model should be run how many times?
+reps <- 30
+```
+
 
 Michael Betancourt thinks that an [induced dirichlet prior](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html) on the cut points may be a good choice for ordinal logistic models.
 
@@ -161,9 +166,6 @@ knitr::kable(parframe_gam, caption="Model parameterizations used to try to recap
 # parallel::clusterExport(cl, c("fit_gamma_model", "parlist_gam", "simdat"))
 # parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 # 
-# # fit the models
-# ## run each model 30 times
-# reps <- 30
 # 
 # for (i in 1:reps) {
 #   fits_gam <- parallel::parLapply(cl, parlist_gam, function(x) {fit_gamma_model(simdatlist = simdat, pars=x, groups=FALSE)})
@@ -351,9 +353,6 @@ knitr::kable(parframe_indir, caption="Model parameterizations used to try to rec
 # parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat"))
 # parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 # 
-# # fit the models
-# ## run each model x times
-# reps <- 30
 # 
 # for (i in 1:reps) {
 #   fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat, pars=x, groups=FALSE)})
