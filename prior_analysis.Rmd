@@ -215,46 +215,21 @@ params_gam <- extracts_gam$pars %>%
 
 ```
 
-### Recapture
+### Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
 ```{r GammaHDPI, message=FALSE, warning=FALSE}
-# calculate whether true value is in HPDI
+# calculate whether true values are in HPDI
 
-in50 <- map(params_gam, calc_HPDI, prob=0.5)
-
-in75 <- map(params_gam, calc_HPDI, prob=0.75)
-
-in90 <- map(params_gam, calc_HPDI, prob=.90)
-
-# recaptured parameters
-perform50 <- map_dfr(in50, bind_rows) %>%
-  full_join(parframe_gam) 
-perform90 <- map_dfr(in90, bind_rows) %>%
-  full_join(parframe_gam) 
-
-# proportion of parameters recaptured
-prop_recaptured50 <- perform50 %>%
-  group_by(modelid, run) %>%
-  summarise(captured = sum(inint)) %>%
-  summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
-  full_join(parframe_gam) %>%
-  arrange(beta, desc(mean_captured))
-
-prop_recaptured90 <- perform90 %>%
-  group_by(modelid, run) %>%
-  summarise(captured = sum(inint)) %>%
-  summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
-  full_join(parframe_gam) %>%
-  arrange(beta, desc(mean_captured))
+recaptured_gam <- which_params_recaptured(params_gam) # in or out
+prop_recaptured_gam <- calc_prop_recaptured_overall(recaptured_gam, parframe_gam) # average number of parameters recaptured by each model
+prop_recaptured_by_param_gam <- calc_recaptured_by_param(recaptured_gam, parframe_gam) #proportion of model runs where a parameter is returned correctly
 
 
-#knitr::kable(prop_recaptured50, caption = "Proportion of params recaptured in 50% HPDI")
-#knitr::kable(prop_recaptured90, caption = "Proportion of params recaptured in 90% HPDI")
 ```
 
-```{r plotGammaRecaptureoverall}
-ggplot(prop_recaptured50, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
+```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs"}
+ggplot(prop_recaptured_gam$fifty, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
@@ -262,7 +237,7 @@ ggplot(prop_recaptured50, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captu
   scale_fill_viridis_c(limits=c(0,5)) +
   ylab("beta_rate")
 
-ggplot(prop_recaptured90, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
+ggplot(prop_recaptured_gam$ninety, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
@@ -277,24 +252,13 @@ Parameters are recaptured better when transition speed is fast, as long as the c
 
 Which parameters are easier or harder to recapture?
 
-```{r plotGammaRecapture}
-#knitr::kable(perform50, caption = "Ability of the different models to recapture parameters in 50% HPDI. Each model only run only once.")
-#
-# proportion of the time each parameter is returned correctly
+```{r plotGammaRecapture, caption="Proportion of model runs where the HDPI contains the true parameter value"}
 
-perform50_summary <- perform50 %>%
-  group_by(modelid, gammaid, beta_rate, beta, param) %>%
-  summarise(prop_inint = mean(inint))
-
-perform90_summary <- perform90 %>%
-  group_by(modelid, gammaid, beta_rate, beta, param) %>%
-  summarise(prop_inint = mean(inint))
-
-ggplot(perform50_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+ggplot(prop_recaptured_by_param_gam$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="black") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("beta", scales="free") +
+  facet_wrap("transition", scales="free") +
   ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
   theme(legend.position = "top") +
   ylab("model id")
@@ -302,11 +266,11 @@ ggplot(perform50_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) +
 
 #knitr::kable(perform90, caption = "Ability of the different models to recapture parameters in 90% HPDI. Each model only run only once, don't shoot me.")
 
-ggplot(perform90_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="black") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("beta", scales="free") +
+  facet_wrap("transition", scales="free") +
   ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
   theme(legend.position = "top") +
   ylab("model id")
