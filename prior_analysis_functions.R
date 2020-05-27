@@ -160,6 +160,24 @@ label_names <- function(x, label) {
     return(x)
 }
 
+
+
+
+#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df
+bind_true_model_pars <- function(fits, parlist) {
+    # extract params from model object
+    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
+
+    # label params as coming from the model or as true params used to
+    params <- map(params, label_names, label="model")
+    parlist <- map(parlist, label_names, label="true")
+
+    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
+    params <- map2(params, parlist, cbind)
+
+    return(params)
+}
+
 # take a stan object and find out if there's anything egregiously wrong with it
 check_model <- function(stanobj) {
     nuts <- nuts_params(stanobj)
@@ -179,23 +197,8 @@ check_list_of_models <- function(model_list) {
         rename(modelid=.id)
 }
 
-#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df
-bind_true_model_pars <- function(fits, parlist) {
-    # extract params from model object
-    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
-
-    # label params as coming from the model or as true params used to
-    params <- map(params, label_names, label="model")
-    parlist <- map(parlist, label_names, label="true")
-
-    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
-    params <- map2(params, parlist, cbind)
-
-    return(params)
-}
-
 # Extract model configurations and the most obvious problems with fit/convergence from stanfit objects. Stanfit objects are in lists in .rds files saved in path. path is a string denoting the directory where the rds files are stored. Nothing other than .rds files with lists of stanfit objects should be stored in path.
-extract_pars_and_problems <- function(path) {
+extract_pars_and_problems <- function(path, parlist) {
     fits <- list.files(path=path)
     reps <- length(fits)
     pars <- list()
@@ -203,8 +206,8 @@ extract_pars_and_problems <- function(path) {
 
     for (i in 1:reps) {
         run <- readRDS(paste0(path, fits[i])) # read in first run of 27 models
-        run_pars <- bind_true_model_pars(run, parlist=parlist_gam)
-        run_fit <- check_list_of_models(run) %>%
+        run_pars <- bind_true_model_pars(run, parlist=parlist) # extract parameters
+        run_fit <- check_list_of_models(run) %>% # id problems
             mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
             filter(all_bads > 0) %>%
             select(-all_bads)
@@ -259,6 +262,59 @@ calc_HPDI <- function(params, prob) {
     tf <- compframe %>% mutate(inint = true > low & true < high)
     return(tf)
 
+}
+
+# For each parameter (5) in each model (27) in each run (30), is a given parameter in the 50% or 90% HPDI? modelpars is a list of dataframes. Each dataframe in the list contains parameters from 30 runs of 1 model along with the true parameters used to simulate the datasets.
+# output is a list of 2 dataframes 4050 rows each (5x27x30) - with each parameter estimated by the model and an inint column with TRUE if it falls in the HPDI interval and FALSE if not.
+which_params_recaptured <- function(modelpars) {
+    in50 <- map(modelpars, calc_HPDI, prob=0.5)
+
+    #in75 <- map(params_indir, calc_HPDI, prob=0.75)
+
+    in90 <- map(modelpars, calc_HPDI, prob=.90)
+
+    # recaptured parameters (refactor this later so it's all in one df
+    perform50 <- map_dfr(in50, bind_rows)
+    perform90 <- map_dfr(in90, bind_rows)
+
+    return(list(fifty = perform50, ninety=perform90))
+}
+
+# calculate the proportion of parameters recaptured (averaged across runs) by each model
+calc_prop_recaptured_overall <- function(inint, truepars) {
+
+    # proportion of parameters recaptured
+    prop_recaptured50 <- inint$fifty %>%
+        group_by(modelid, run) %>%
+        summarise(captured = sum(inint)) %>%
+        summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
+        full_join(truepars) %>%
+        arrange(beta, desc(mean_captured))
+
+
+    prop_recaptured90 <- inint$ninety %>%
+        group_by(modelid, run) %>%
+        summarise(captured = sum(inint)) %>%
+        summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
+        full_join(truepars) %>%
+        arrange(beta, desc(mean_captured))
+
+    return(list(fifty = prop_recaptured50, ninety = prop_recaptured90))
+}
+
+# for each model type, in what proportion of runs is a given parameter returned correctly
+calc_recaptured_by_param <- function(inint, truepars) {
+    perform50_summary <- inint$fifty %>%
+        group_by(modelid, param) %>%
+        summarise(prop_inint = mean(inint)) %>%
+        left_join(truepars)
+
+    perform90_summary <- inint$ninety %>%
+        group_by(modelid, param) %>%
+        summarise(prop_inint = mean(inint)) %>%
+        left_join(truepars)
+
+    return(list(fifty=perform50_summary, ninety=perform90_summary))
 }
 
 # function to plot modeled parameters with label being a string to label the graph (usually prior and whether groups were included and pardf is the modeled parameter dataframe) trueparams is a one row dataframe of true parameters. h is a global parameter have fun!
