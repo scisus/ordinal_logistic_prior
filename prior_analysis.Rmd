@@ -1,7 +1,7 @@
 ---
 title: "Choosing priors in an ordinal logistic model"
 author: "Susannah Tysor"
-date: "`r format(Sys.time(), '%d %B, %Y')`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
 output: html_document
 ---
 
@@ -144,6 +144,8 @@ parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
 
 # format parframe so it works with parLapply better
 parlist_gam <- make_parframe_list(parframe_gam)
+
+
 ```
 
 So there are 3 simulated datasets - 1 for each of three transition speeds. I'm going to try to fit them both with 3 rates for the $\beta$'s exponential prior and 3 shape and rate combinations for the cut points' gamma prior, a total of 27 model runs. 
@@ -220,7 +222,7 @@ params_gam <- extracts_gam$pars %>%
 ### Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
-```{r GammaHDPI, message=FALSE, warning=FALSE}
+```{r GammaHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 # calculate whether true values are in HPDI
 
 recaptured_gam <- which_params_recaptured(params_gam) # in or out
@@ -264,9 +266,6 @@ ggplot(prop_recaptured_by_param_gam$fifty, aes(x=param, y=as.factor(modelid), fi
   ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
   theme(legend.position = "top") +
   ylab("model id")
-  
-
-#knitr::kable(perform90, caption = "Ability of the different models to recapture parameters in 90% HPDI. Each model only run only once, don't shoot me.")
 
 ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="black") +
@@ -398,11 +397,11 @@ params_indir <- extracts_indir$pars %>%
 
 ```
 
-### Recapture
+### Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
 
-```{r indirHDPI, message=FALSE, warning=FALSE}
+```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 # calculate whether true value is in HPDI
 
 recaptured_indir <- which_params_recaptured(params_indir)
