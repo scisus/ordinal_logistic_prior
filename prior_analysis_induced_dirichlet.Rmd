@@ -49,11 +49,11 @@ parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 
 # fit the models
 ## run each model x times
-reps <- 2
+reps <- 30
 
 for (i in 1:reps) {
   fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat, pars=x, groups=FALSE)})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/indir_runs/run", i, ".rds"))
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/covar_runs/run", i, ".rds"))
   rm(fits_indir)
   gc()
 }
@@ -61,60 +61,120 @@ for (i in 1:reps) {
 parallel::stopCluster(cl) #close the cluster
 
 ```
-```{r}
-indir_params <- bind_true_model_pars(indirfits, parlist_indir)
+
+```{r readGammaModels, warning=FALSE, cache=TRUE}
+
+# pull in parameters and info on divergences, etc from saved stanfit objects
+# very slow step. consider parallelizing to the extent your ram can handle
+
+extracts_indir <- extract_pars_and_problems(path="induced_dirichlet/covar_runs/", parlist=parlist_indir)
 ```
-```{r modelcheck}
-map(indirfits, function(x) {rstan:::throw_sampler_warnings(x)})
-```
+### Model check
+Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
 
-```{r}
-map(indir_params, posterior_differencer) %>%
-    map2(.y=indir_params, .f=diffplotter)
-```
-
-```{r induced_dirichlet_hpdi}
-in50 <- map(indir_params, calc_HPDI, prob=0.5)
-
-in75 <- map(indir_params, calc_HPDI, prob=0.75)
-
-in90 <- map(indir_params, calc_HPDI, prob=0.90)
-
-# recaptured parameters
-perform50 <- map_df(in50, bind_rows, .id="modelid") %>%
-  dplyr::mutate(modelid=as.integer(modelid)) %>%
-  full_join(parframe_indir) 
-perform90 <- map_df(in90, bind_rows, .id = "modelid") %>%
-  dplyr::mutate(modelid=as.integer(modelid)) %>%
-  full_join(parframe_indir)
-
-# proportion recaptured parameters
-prop_recaptured50 <- perform50 %>%
+```{r indirModelCheck}
+problems_indir <- extracts_indir$problems %>%
+  map_dfr(bind_rows, .id=".id") %>%
+  rename(run=.id) %>%
   group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
-  full_join(parframe_indir) %>%
-  arrange(beta, desc(all_captured))
+  summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
+  
+knitr::kable(problems_indir, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1 - induced dirichlet")
 
-prop_recaptured90 <- perform90 %>%
-  group_by(modelid) %>%
-  summarise(all_captured = sum(inint)/n()) %>%
-  full_join(parframe_indir) %>%
-  arrange(beta, desc(all_captured))
 ```
 
-```{r plot_dirichlet_overall}
-ggplot(prop_recaptured50, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=all_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=paste(anchor, beta_rate, sep=","))) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI") +
-  scale_fill_gradient(low="white", high="steelblue")
+15/27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems.
 
-ggplot(prop_recaptured90, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=all_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=paste(anchor, beta_rate, sep=","))) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI") +
-  scale_fill_gradient(low="white", high="violetred")
+```{r indirExtract}
+
+# extract parameters from stan objects and pair with true param values
+params_indir <- extracts_indir$pars %>%
+  map_dfr(bind_rows, .id = ".id") %>%
+  rename(run=.id) %>%
+  split(.$modelid)
+
 ```
-With a normally distributed covariate, the induced dirichlet really struggles, but is good with uniform. Reducing data points from 500 to 50 reduces quality. Also a weird thing keeps happening where 50% seems to do better in some cases than 90% hpdi, but might be a colour scaling issue.
+
+### Recapture
+
+Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
+
+```{r indirHDPI, message=FALSE, warning=FALSE}
+# calculate whether true value is in HPDI
+
+recaptured_indir <- which_params_recaptured(params_indir)
+prop_recaptured_indir <- calc_prop_recaptured_overall(recaptured_indir, truepars=parframe_indir)
+prop_recaptured_by_param_indir <- calc_recaptured_by_param(recaptured_indir, parframe_indir) 
+
+```
+
+```{r plotIndirRecaptureoverall}
+ggplot(prop_recaptured_indir$fifty, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
+  geom_tile(colour="white") +
+  geom_text(aes(label=modelid)) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,5)) +
+  ylab("beta_rate")
+
+ggplot(prop_recaptured_indir$ninety, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
+  geom_tile(colour="white") +
+  geom_text(aes(label=modelid)) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset") +
+  scale_fill_viridis_c(limits=c(0,5)) +
+  ylab("beta_rate")
+```
+
+Using an induced dirichlet prior on the cutpoints doesn't seem to work very well.
+
+Which parameters are easier or harder to recapture?
+
+```{r plotIndirRecapture}
+#knitr::kable(perform50, caption = "Ability of the different models to recapture parameters in 50% HPDI. Each model only run only once.")
+#
+# proportion of the time each parameter is returned correctly
+
+# perform50_summary <- perform50 %>%
+#   group_by(modelid, anchor, beta_rate, beta, param, transition) %>%
+#   summarise(prop_inint = mean(inint))
+# 
+# perform90_summary <- perform90 %>%
+#   group_by(modelid, anchor, beta_rate, beta, param, transition) %>%
+#   summarise(prop_inint = mean(inint))
+#   
+
+
+
+ggplot(prop_recaptured_by_param$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with anchor and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("model id")
+
+ggplot(perform90_summary, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="black") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with anchor and beta rate labels") +
+  theme(legend.position = "top") +
+  ylab("model id")
+
+```
+When transitions are fast, no anchor allows $\beta$ and $c$ to be recaptured, but half transition points $h$ are (but $h_2$ isn't ever captured in 50% HPDI, only 90%). 
+
+When transitions are medium speed, a large anchor allows all parameters to be recaptured in the 90% HPDI. Any anchor allows $h$ to be recaptured in the 90%, but $h_2$, again, is never captured in the 50%.
+
+When transitions are slow, $h2$ is never recaptured, but all other parameters are recaptured in the 90% HPDI. $\beta$ is recaptured better when anchors are lower, $c_1$ is captured better when anchor is 5, and $h_1$ is captured better when anchors are large (10).
+
+## Best prior parameter choices
+
+```{r plotGammaParams, fig.height=3, fig.width=4}
+
+map(params_indir[base::sample(1:30, 5)], parplot) # pick 5 models at random to plot
+
+```
