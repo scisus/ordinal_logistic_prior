@@ -434,7 +434,6 @@ Which parameters are easier or harder to recapture?
 
 ```{r plotIndirRecapture}
 
-
 ggplot(prop_recaptured_by_param_indir$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="black") +
   scale_fill_viridis_c()  +
@@ -444,7 +443,7 @@ ggplot(prop_recaptured_by_param_indir$fifty, aes(x=param, y=as.factor(modelid), 
   theme(legend.position = "top") +
   ylab("model id")
 
-ggplot(prop_recaptured_by_param$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="black") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +

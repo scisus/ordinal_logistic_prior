@@ -357,4 +357,6 @@ p3 <- ggplot(modelpars, aes(x=h1_model, color=run)) +
     geom_vline(xintercept = c(unique(modelpars$h1_true), unique(modelpars$h2_true)))
 
 cowplot::plot_grid(p1, p2, p3, labels=paste("model", modelpars$modelid_true))
+
+
 }
