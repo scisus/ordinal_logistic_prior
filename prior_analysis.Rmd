@@ -202,12 +202,13 @@ problems_gam <- extracts_gam$problems %>%
 knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1 - gamma")
 
 ```
-18/27 models had problems with Rhat or neff_ratio in 1-5 of the 30 model runs. No divergences ever though. That's not ideal
 
-[ADD A FILTER HERE SHOWING THE PARAM VALUES THAT DON'T CAUSE PROBLEMS]
+`r nrow(problems_gam)` out of 27 models had problems with Rhat or neff_ratio in 1-5 of the 30 model runs. That's not ideal. No divergences ever though. 
+
 
 ```{r gammaPrettyModels}
-
+noproblem_models_gam <- dplyr::filter(parframe_gam, !modelid %in% problems_gam$modelid)
+knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
 ```
 
 ```{r gammaExtract}
@@ -387,7 +388,12 @@ knitr::kable(problems_indir, caption = "Models with divergences, rhats > 1, or n
 
 ```
 
-15/27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems.
+`r nrow(problems_indir)` out of 27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems.
+
+```{r indirPrettyModels}
+noproblem_models_indir <- dplyr::filter(parframe_indir, !modelid %in% problems_indir$modelid)
+knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
+```
 
 ```{r indirExtract}
 
