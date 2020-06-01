@@ -189,6 +189,11 @@ knitr::kable(parframe_gam, caption="Model parameterizations and simulated datase
 
 ```
 
+The Stan program implementing these models is
+```{r}
+writeLines(readLines("gamma/gamma_covar.stan"))
+```
+
 ```{r readGammaModels, warning=FALSE, cache=TRUE}
 
 # pull in parameters and info on divergences, etc from saved stanfit objects
@@ -196,7 +201,7 @@ knitr::kable(parframe_gam, caption="Model parameterizations and simulated datase
 extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/", parlist=parlist_gam)
 ```
 ### Model check
-Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
+Here's a very cursory check for problems after fitting the models - divergences and issues with rhats and neff_ratios.
 
 ```{r gammaModelCheck}
 problems_gam <- extracts_gam$problems %>%
@@ -373,6 +378,12 @@ knitr::kable(parframe_indir, caption="Model parameterizations used to try to rec
 
 ```
 
+
+The Stan program implementing these models is
+```{r}
+writeLines(readLines("induced_dirichlet/dirichlet_covar.stan"))
+```
+
 ```{r readIndirModels, warning=FALSE, cache=TRUE}
 
 # pull in parameters and info on divergences, etc from saved stanfit objects
@@ -380,8 +391,9 @@ knitr::kable(parframe_indir, caption="Model parameterizations used to try to rec
 
 extracts_indir <- extract_pars_and_problems(path="induced_dirichlet/covar_runs/", parlist=parlist_indir)
 ```
+
 ### Model check
-Do a naive check for model problems - divergences and issues with rhats and neff_ratios.
+Do a dangerously cursory check for model problems - divergences and issues with rhats and neff_ratios.
 
 ```{r indirModelCheck}
 problems_indir <- extracts_indir$problems %>%
