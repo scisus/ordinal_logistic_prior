@@ -96,7 +96,11 @@ ggplot(logisticexp, aes(x=x, y=value, color=name)) +
   geom_line()
 ```
 
-Now the real fake data:
+I simulated data with the Stan program
+
+```{r}
+writeLines(readLines("simulate/covar_sim.stan"))
+```
 
 ```{r simulate_data}
 simulation_input <- set_simulation_parameters(N=500)
@@ -527,7 +531,7 @@ I'm not sure! The model seems pretty fussy about having an anchor in the vicinit
 
 # Gamma vs induced dirichlet prior on the cutpoints
 
-I might be fighting more fit problems in Stan with a gamma prior than an induced dirichlet, however. Slow transition data fit with models with dirichlet priors are both less likely to have obvious fit problems (like sad rhats) and to return the correct parameter values for slow transition datasets. This is better than the situation with the gamma prior where slow transition datasets were also less likely to have obvious fit problems, but also to estimate parameters badly when it did so.
+I might be fighting more fit problems in Stan with a gamma prior than an induced dirichlet. Slow transition data fit with models with dirichlet priors are both less likely to have obvious fit problems (like sad rhats) and to return the correct parameter values for slow transition datasets. This is better than the situation with the gamma prior where slow transition datasets were also less likely to have obvious fit problems, but also to estimate parameters badly when it did so.
 
 On the other hand, my data doesn't have a slow transition - but I could *make* it have a slow transition by re-scaling $x$.
 
