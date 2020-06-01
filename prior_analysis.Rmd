@@ -56,7 +56,7 @@ Normally, priors are bottom up - you choose a prior distribution for each parame
 
 > To avoid the non-identifiability of the interior cut points from propagating to the posterior distribution we need a principled prior model that can exploit domain expertise to consistently regularize all of the internal cut points at the same time. Regularization of the cut points, however, is subtle given their ordering constraint. Moreover domain expertise is awkward to apply on the abstract latent space where the internal cut points are defined. ([Betancourt](https://betanalpha.github.io/assets/case_studies/ordinal_regression.html))
 
-The induced ordinal logistic prior on the cutpoints is a sort of top-down prior.
+The induced ordinal logistic prior on the cutpoints is a sort of top-down prior that works through the ordinal probabilities.
 
 If I simulate data like mine using an ordinal logistic model, can I recapture the parameters using an ordinal logistic model with a gamma or induced dirichlet prior on the cut points?
 
@@ -64,12 +64,14 @@ At this point, I don't actually care very much about recapturing the cut points 
 
 Eventually I will want to consider how different groups affect $h$ through deviations from the main slope $\beta$ (*e.g* $h = \frac{c}{\beta + \beta_{site_i} + \beta_{prov_i}}$) and so estimating $\beta$s well will be more important then. But for now, let's just consider an ordinal logistic model with a covariate/latent effect and no groups.
 
-## Goals
+# Goals
+
 1) When can I recapture parameters with a gamma prior?
 2) When can I recapture parameters with an induced dirichlet prior?
 3) Which one works best?
 
 # Simulate data
+
 First let's simulate some data that's kind of like mine.
 
 I have three potential states $K$ and a covariate $x$. $x$ is always positive and measurements are only made when $x$ is between about $8$ and $18$. Data collection begins when workers notice trees are approaching or entering state $2$ and stops as trees enter state $3$.
@@ -105,7 +107,7 @@ plot_simulated_data(simdat, simulation_input$inputlist)
 
 ```
 
-## Attempt to recapture parameters with a gamma prior on cutpoints
+# Recapture parameters with gamma
 
 Now I want to try to recapture parameters.
 
@@ -190,6 +192,7 @@ knitr::kable(parframe_gam, caption="Model parameterizations and simulated datase
 ```
 
 The Stan program implementing these models is
+
 ```{r}
 writeLines(readLines("gamma/gamma_covar.stan"))
 ```
@@ -200,7 +203,9 @@ writeLines(readLines("gamma/gamma_covar.stan"))
 
 extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/", parlist=parlist_gam)
 ```
-### Model check
+
+## Model check
+
 Here's a very cursory check for problems after fitting the models - divergences and issues with rhats and neff_ratios.
 
 ```{r gammaModelCheck}
@@ -242,9 +247,11 @@ Here is a selection of parameter distributions from all 30 runs of 5 random mode
 map(params_gam[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
 
 ```
-### Recapture rate
+
+## Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
+
 ```{r GammaHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 # calculate whether true values are in HPDI
 
@@ -255,7 +262,7 @@ prop_recaptured_by_param_gam <- calc_recaptured_by_param(recaptured_gam, parfram
 
 ```
 
-```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=6}
+```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=4}
 ggplot(prop_recaptured_gam$fifty, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
@@ -307,7 +314,7 @@ A skinny gamma prior centered in between the transition points makes it difficul
 
 $\lambda$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $\lambda$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
 
-#### Half transition points $h$
+### Half transition points $h$
 
 Both $h$ are always captured in the 90% HPDI, even when $\beta$ and $c$ are not recaptured. So the *ratio* between $\beta$ and $c$ is being captured, even when the actual values of those parameters aren't.
 
@@ -315,7 +322,7 @@ $h_2$ is estimated best (*i.e* in 50% HPDI) when transitions are fast and $h_1$ 
 
 Good estimates for $\beta$ and $c$ are correlated with worse estimates for $h$. This is a concerning tradeoff.
 
-#### Best prior parameter choices
+### Best prior parameter choices
 
 Fat to middling gamma shape. 
 
@@ -323,14 +330,16 @@ Beta rate ($\lambda$) doesn't matter that much, but 2 works best.
 
 The best choices for your prior parameters in this situation are a moderately loose $\lambda$ of 2 and a fat to middling gamma distribution.
 
-#### Caveats
+### Caveats
+
 I only tried centered the gamma prior on the cutpoints in between the two $h$. Could also try centering it closer to one transition or the other, or changing skew.
 
 While models run on the slow transition dataset were less likely to have problems like with rhat, etc (given the default options of the stan call), it was also harder to estimate their parameters well. That's not ideal? But maybe rhat, etc problems can be fixed? I didn't investigate very thoroughly what was going wrong.
 
 
 
-## Attempt to recapture parameters with induced dirichlet prior on cutpoints
+# Recapture parameters with induced dirichlet
+
 Let's repeat this analysis using an induced dirichlet prior on cutpoints. I'll use the same simulated data as above.
 
 I'll test the same $\lambda$ parameters as above. I'll also vary the anchor parameter in the induced dirichlet prior.
@@ -357,7 +366,7 @@ parlist_indir <- make_parframe_list(parframe_indir)
 
 I'm going to fit all three simulated datasets with each of the 3 rate prior parameters on beta and anchor parameters on the cutpoints.
 
-``````{r paramsTableIndir}
+```{r paramsTableIndir}
 knitr::kable(parframe_indir, caption="Model parameterizations used to try to recapture params - induced dirichlet")
 ```
 
@@ -388,6 +397,7 @@ knitr::kable(parframe_indir, caption="Model parameterizations used to try to rec
 
 
 The Stan program implementing these models is
+
 ```{r}
 writeLines(readLines("induced_dirichlet/dirichlet_covar.stan"))
 ```
@@ -400,7 +410,8 @@ writeLines(readLines("induced_dirichlet/dirichlet_covar.stan"))
 extracts_indir <- extract_pars_and_problems(path="induced_dirichlet/covar_runs/", parlist=parlist_indir)
 ```
 
-### Model check
+## Model check
+
 Do a dangerously cursory check for model problems - divergences and issues with rhats and neff_ratios.
 
 ```{r indirModelCheck}
@@ -421,7 +432,7 @@ noproblem_models_indir <- dplyr::filter(parframe_indir, !modelid %in% problems_i
 knitr::kable(noproblem_models_indir, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
 ```
 
-TO DO
+Slow transition models are least likely to have obvious problems.
 
 ```{r indirExtract}
 
@@ -440,7 +451,8 @@ Here is a selection of parameter distributions from all 30 runs of 5 random mode
 map(params_indir[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
 
 ```
-### Recapture rate
+
+## Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
 
@@ -453,7 +465,7 @@ prop_recaptured_by_param_indir <- calc_recaptured_by_param(recaptured_indir, par
 
 ```
 
-```{r plotIndirRecaptureoverall}
+```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=4}
 ggplot(prop_recaptured_indir$fifty, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
@@ -503,7 +515,8 @@ When transitions are medium speed, a large anchor allows all parameters to be re
 
 When transitions are slow, $h2$ is never recaptured, but all other parameters are recaptured in the 90% HPDI. $\beta$ is recaptured better when anchors are lower, $c_1$ is captured better when anchor is 5, and $h_1$ is captured better when anchors are large (10).
 
-#### Interpretation
+### Interpretation
+
 $c_1$ are `5`, `10`, and `20` for slow, medium, and fast transition datasets, respectively. Models were tried with anchors at `0`, `5`, and `10`. Models perform best when anchors are below - but not too far below - $c_1$. I think the dataset with a fast transition is so hard to fit a model to because an anchor of `10` is too far away from a $c_1$ at `20`. The model *does* recapture $c$:$\beta$. Since $c$ is underestimated, $\beta$ ends up being underestimated as well to preserve the ratio.
 
 A model with an induced dirichlet prior is most likely to estimate parameter values correctly when the anchor is near the first cutpoint.
@@ -512,19 +525,27 @@ A model with an induced dirichlet prior is most likely to estimate parameter val
 
 I'm not sure! The model seems pretty fussy about having an anchor in the vicinity of the first cutpoint, which is quite hard to know.
 
-## Gamma vs induced dirichlet prior on the cutpoints
+# Gamma vs induced dirichlet prior on the cutpoints
+
+I might be fighting more fit problems in Stan with a gamma prior than an induced dirichlet, however. Slow transition data fit with models with dirichlet priors are both less likely to have obvious fit problems (like sad rhats) and to return the correct parameter values for slow transition datasets. This is better than the situation with the gamma prior where slow transition datasets were also less likely to have obvious fit problems, but also to estimate parameters badly when it did so.
+
+On the other hand, my data doesn't have a slow transition - but I could *make* it have a slow transition by re-scaling $x$.
 
 Given what I found here, I think that a gamma prior is a better option for me. It definitely recaptured the parameters more often. I can use my domain specific knowledge around the potential range of $h$ and $\beta$ to choose a gamma distribution wide enough to cover a reasonable cutpoint range.
 
+This model seems fussy and I'm concerned about how it's going to behave when I increase the complexity from $\beta x$ to something like $(\beta + \beta_{site} + \beta_{prov} + \beta_{clone}) x$
+
+
 ```{r compare}
 
-ggplot(prop_recaptured_gam$ninety, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
+ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="white") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
   facet_wrap("transition", scales="free") +
   ggtitle("Gamma prior", subtitle="Proportion of parameters recaptured in 90% HPDI") +
-  scale_fill_viridis_c(limits=c(0,5)) +
-  ylab("beta_rate")
+  theme(legend.position = "top") +
+  ylab("model id")
 
 ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
   geom_tile(color="white") +
