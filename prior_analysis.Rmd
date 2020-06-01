@@ -219,8 +219,10 @@ knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or nef
 
 ```{r gammaPrettyModels}
 noproblem_models_gam <- dplyr::filter(parframe_gam, !modelid %in% problems_gam$modelid)
-knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
+knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had a (very obvious) problem")
 ```
+
+Models with slow transition speeds were less likely to have problems. Slow transitions with "loose" priors on $\beta$ run into trouble - except when the cutpoints are highly constrained near the real values by a skinny gamma.
 
 ```{r gammaExtract}
 
@@ -233,6 +235,13 @@ params_gam <- extracts_gam$pars %>%
 
 ```
 
+Here is a selection of parameter distributions from all 30 runs of 5 random model fits. "True" values marked with vertical black lines.
+
+```{r plotGammaParams, fig.height=3, fig.width=4}
+
+map(params_gam[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
+
+```
 ### Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
@@ -246,12 +255,12 @@ prop_recaptured_by_param_gam <- calc_recaptured_by_param(recaptured_gam, parfram
 
 ```
 
-```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs"}
+```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=6}
 ggplot(prop_recaptured_gam$fifty, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset") +
+  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
   scale_fill_viridis_c(limits=c(0,5)) +
   ylab("beta_rate")
 
@@ -259,7 +268,7 @@ ggplot(prop_recaptured_gam$ninety, aes(x=gammaid, y=as.factor(beta_rate), fill=m
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset") +
+  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
   scale_fill_viridis_c(limits=c(0,5)) +
   ylab("beta_rate")
 ```
@@ -273,7 +282,7 @@ Which parameters are easier or harder to recapture?
 ```{r plotGammaRecapture, caption="Proportion of model runs where the HDPI contains the true parameter value"}
 
 ggplot(prop_recaptured_by_param_gam$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="black") +
+  geom_tile(color="white") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
   facet_wrap("transition", scales="free") +
@@ -282,7 +291,7 @@ ggplot(prop_recaptured_by_param_gam$fifty, aes(x=param, y=as.factor(modelid), fi
   ylab("model id")
 
 ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="black") +
+  geom_tile(color="white") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
   facet_wrap("transition", scales="free") +
@@ -296,7 +305,7 @@ $\beta$ and $c$ are never recaptured in the 50% HPDI when the real $\beta$ is sl
 
 A skinny gamma prior centered in between the transition points makes it difficult to recapture $\beta$ and $c$ across the board, unless $\beta$ is near 1 (See models 3,6,9, 21, 24, 27). 
 
-$beta_rate$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $beta_rate$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
+$\lambda$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $\lambda$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
 
 #### Half transition points $h$
 
@@ -310,22 +319,21 @@ Good estimates for $\beta$ and $c$ are correlated with worse estimates for $h$. 
 
 Fat to middling gamma shape. 
 
-Beta rate doesn't matter that much, but 2 works best.
+Beta rate ($\lambda$) doesn't matter that much, but 2 works best.
 
-Assume centered between transitions because that's all I tried. Could also try centering it closer to one transition or the other, or changing skew. 
+The best choices for your prior parameters in this situation are a moderately loose $\lambda$ of 2 and a fat to middling gamma distribution.
 
-The best choices for your prior parameters in this situation are a moderately loose $\beta_rate$ of 2 and a fat to middling gamma distribution.
+#### Caveats
+I only tried centered the gamma prior on the cutpoints in between the two $h$. Could also try centering it closer to one transition or the other, or changing skew.
 
-```{r plotGammaParams, fig.height=3, fig.width=4}
+While models run on the slow transition dataset were less likely to have problems like with rhat, etc (given the default options of the stan call), it was also harder to estimate their parameters well. That's not ideal? But maybe rhat, etc problems can be fixed? I didn't investigate very thoroughly what was going wrong.
 
-map(params_gam[base::sample(1:27, 5)], parplot) # pick 5 models at random to plot
 
-```
 
 ## Attempt to recapture parameters with induced dirichlet prior on cutpoints
 Let's repeat this analysis using an induced dirichlet prior on cutpoints. I'll use the same simulated data as above.
 
-I'll test the same $beta_{rate}$ parameters as above. I'll also vary the anchor parameter in the induced dirichlet prior.
+I'll test the same $\lambda$ parameters as above. I'll also vary the anchor parameter in the induced dirichlet prior.
 
 In his example, Betancourt sets the anchor to 0. I don't completely understand how the anchor works, so I'll try 5 and 10 as well and see what happens.
 
@@ -406,12 +414,14 @@ knitr::kable(problems_indir, caption = "Models with divergences, rhats > 1, or n
 
 ```
 
-`r nrow(problems_indir)` out of 27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems.
+`r nrow(problems_indir)` out of 27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems. Again, no divergences.
 
 ```{r indirPrettyModels}
 noproblem_models_indir <- dplyr::filter(parframe_indir, !modelid %in% problems_indir$modelid)
-knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
+knitr::kable(noproblem_models_indir, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
 ```
+
+TO DO
 
 ```{r indirExtract}
 
@@ -423,6 +433,13 @@ params_indir <- extracts_indir$pars %>%
 
 ```
 
+Here is a selection of parameter distributions from all 30 runs of 5 random model fits. "True" values marked with vertical black lines.
+
+```{r plotIndirParams, fig.height=3, fig.width=4}
+
+map(params_indir[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
+
+```
 ### Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
@@ -441,7 +458,7 @@ ggplot(prop_recaptured_indir$fifty, aes(x=as.factor(anchor), y=as.factor(beta_ra
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset") +
+  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
   scale_fill_viridis_c(limits=c(0,5)) +
   ylab("beta_rate")
 
@@ -449,7 +466,7 @@ ggplot(prop_recaptured_indir$ninety, aes(x=as.factor(anchor), y=as.factor(beta_r
   geom_tile(colour="white") +
   geom_text(aes(label=modelid)) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset") +
+  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
   scale_fill_viridis_c(limits=c(0,5)) +
   ylab("beta_rate")
 ```
@@ -461,16 +478,16 @@ Which parameters are easier or harder to recapture?
 ```{r plotIndirRecapture}
 
 ggplot(prop_recaptured_by_param_indir$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="black") +
+  geom_tile(color="white") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
   facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with anchor and beta rate labels") +
+  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset \n with anchor and beta rate labels") +
   theme(legend.position = "top") +
   ylab("model id")
 
 ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="black") +
+  geom_tile(color="white") +
   scale_fill_viridis_c()  +
   geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
   facet_wrap("transition", scales="free") +
@@ -479,17 +496,42 @@ ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid),
   ylab("model id")
 
 ```
+
 When transitions are fast, no anchor allows $\beta$ and $c$ to be recaptured, but half transition points $h$ are (but $h_2$ isn't ever captured in 50% HPDI, only 90%). 
 
 When transitions are medium speed, a large anchor allows all parameters to be recaptured in the 90% HPDI. Any anchor allows $h$ to be recaptured in the 90%, but $h_2$, again, is never captured in the 50%.
 
 When transitions are slow, $h2$ is never recaptured, but all other parameters are recaptured in the 90% HPDI. $\beta$ is recaptured better when anchors are lower, $c_1$ is captured better when anchor is 5, and $h_1$ is captured better when anchors are large (10).
 
-## Best prior parameter choices
+#### Interpretation
+$c_1$ are `5`, `10`, and `20` for slow, medium, and fast transition datasets, respectively. Models were tried with anchors at `0`, `5`, and `10`. Models perform best when anchors are below - but not too far below - $c_1$. I think the dataset with a fast transition is so hard to fit a model to because an anchor of `10` is too far away from a $c_1$ at `20`. The model *does* recapture $c$:$\beta$. Since $c$ is underestimated, $\beta$ ends up being underestimated as well to preserve the ratio.
 
-```{r plotIndirParams, fig.height=3, fig.width=4}
+A model with an induced dirichlet prior is most likely to estimate parameter values correctly when the anchor is near the first cutpoint.
 
-map(params_indir[base::sample(1:27, 5)], parplot) # pick 5 models at random to plot
+### Best prior parameter choices
 
+I'm not sure! The model seems pretty fussy about having an anchor in the vicinity of the first cutpoint, which is quite hard to know.
+
+## Gamma vs induced dirichlet prior on the cutpoints
+
+Given what I found here, I think that a gamma prior is a better option for me. It definitely recaptured the parameters more often. I can use my domain specific knowledge around the potential range of $h$ and $\beta$ to choose a gamma distribution wide enough to cover a reasonable cutpoint range.
+
+```{r compare}
+
+ggplot(prop_recaptured_gam$ninety, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
+  geom_tile(colour="white") +
+  geom_text(aes(label=modelid)) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Gamma prior", subtitle="Proportion of parameters recaptured in 90% HPDI") +
+  scale_fill_viridis_c(limits=c(0,5)) +
+  ylab("beta_rate")
+
+ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
+  geom_tile(color="white") +
+  scale_fill_viridis_c()  +
+  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
+  facet_wrap("transition", scales="free") +
+  ggtitle("Induced dirichlet prior", subtitle="Proportion of parameters recaptured in 90% HPDI") +
+  theme(legend.position = "top") +
+  ylab("model id")
 ```
-Five random models for induced dirichlet.
