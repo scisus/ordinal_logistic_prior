@@ -7,7 +7,7 @@ output:
     theme: flatly
     toc: true
     toc_float:
-      collapsed:false
+      collapsed: false
       smooth_scroll: true
 ---
 
