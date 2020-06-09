@@ -1,4 +1,32 @@
+---
+title: "Choosing priors in an ordinal logistic model"
+subtitle: "with covariate and group effects"
+author: "Susannah Tysor"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
 
+# Background
+
+[Previously](https://scisus.github.io/ordinal_logistic_prior/prior_analysis.html), I considered whether a gamma or an induced dirichlet prior on cut points in an ordinal logistic model worked better for the kind of data I'm considering.
+
+In this model, the state of flowering depends on how many forcing units have accumulated. 
+
+There are three possible states: 1-not yet flowering, 2- flowering, 3- done flowering. 
+
+$x$ is a kind of forcing unit: when flowering was observed, how much warmth had the population/tree been exposed to since January 1? $x$ is always positive (and always increases monotonically thru time - though time is abstracted out of this model).
+
+$\beta$ describes how fast the transition occurs - small $\beta$s make the transition from between states occur over a wider range of $x$'s. (Translated from forcing units to days, this means does the population transition between states over 1 day, 3 days, a week? But we work in forcing unit space because the trees respond to temperature, not time - and no spring heats up exactly the same so dates are kind of useless for prediction.) $\beta$ is always positive.
+
+A gamma prior on cut points that's got a distribution fat enough to encompass the entire possible range of cut points worked well. An induced dirichlet prior on cut points only works well when it is anchored near the first cut point and when cut points are relatively close together. Since cut points can't be known precisely before running the model
+
+ (e.g. $\beta$ + $\beta$_site + $\beta$_provenance)*x
 # Covariate and a group
 
 What if our data has groups that have different effects?
