@@ -1,0 +1,329 @@
+---
+title: "Choosing priors in an ordinal logistic model"
+subtitle: "with covariate and group effects"
+author: "Susannah Tysor"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+```{r}
+library(dplyr)
+library(rstan)
+library(tidyr)
+library(purrr)
+library(cowplot)
+library(bayesplot)
+
+rstan_options(auto_write=TRUE)
+```
+# Background
+
+[Previously](https://scisus.github.io/ordinal_logistic_prior/prior_analysis.html), I considered whether a gamma or an induced dirichlet prior on cut points in an ordinal logistic model worked better for the kind of data I'm considering.
+
+In this model, the state of flowering depends on how many forcing units have accumulated. 
+
+There are three possible states: 1-not yet flowering, 2- flowering, 3- done flowering. 
+
+$x$ is accumulated forcing: when flowering was observed, how much warmth had the population/tree been exposed to since January 1? $x$ is always positive (and always increases monotonically through time - though time is abstracted out of this model).
+
+$\beta$ describes how fast the transition occurs - small $\beta$s make the transition from between states occur over a wider range of $x$'s. (Translated from forcing units to days, this answers a question like "does the population transition between states over 1 day, 3 days, a week?" We work in forcing unit space because the trees respond to temperature, not time - and no spring heats up exactly the same so dates are kind of useless for prediction.) $\beta$ is always positive.
+
+A gamma prior on cut points that's got a distribution fat enough to encompass the entire possible range of cut points worked well. An induced dirichlet prior on cut points only works well when it is anchored near the first cut point and when cut points are relatively close together. While the model with an induced dirichlet prior can struggle to recapture $\beta$ and cut points $c$, it is pretty good at capturing the relationship between $\beta$ and $c$: $h = \frac{c}{\beta}$, which is the point at which half the trees in a population have transitioned or the point at which an individual tree is 50% likely to have transitioned. 
+
+In the previous analysis, no groups were considered. In reality, I want to know if site, provenance, and clone affect $h$.
+
+## Goals
+1 - Generate data with an ordinal logistic model 
+ a - With linear model structure $(\beta + \beta_{site_i}) x$
+ b - With linear model structure $\beta x + \alpha$
+2 - Fit both models
+3 - Determine whether $\beta$, \beta_{site_i}$, \alpha$, $c$, or $h$ can be returned.
+
+# Simulate site effects
+
+Let's simulate 7 groups with `N=100` observations for each group. Each group's $h$ are shifted by $h_mod$, which is drawn from a standard normal distribution.
+
+```{r}
+hist(rnorm(1000), breaks=20)
+```
+
+
+```{r group simulation}
+
+set_simulation_parameters <- function(N=100, hsd=1) {
+    K <- 3
+    G <- 7 # number of groups (sites)
+    N <- N
+
+    beta <- data.frame(transition = c("medium", "fast"), beta=c(1, 2))
+    cutpoints <- data.frame(c.1= c(10, 20), c.2=c(15, 30), transition=c("medium", "fast"))
+    
+    h_base <- data.frame(h.1 = 10, h.2 = 15) # half transitions
+    h_mod <- rnorm(G, 0, hsd) # how much being in each group modifies half transitions
+    
+    groups <- data.frame(group = 1:G, h_mod = h_mod)
+
+    simu_pars <- merge(beta, cutpoints) %>%
+      merge(h_base) %>%
+      merge(groups) %>%
+      mutate(h.1_group = h.1 + h_mod, h.2_group = h.2 + h_mod) %>%
+      mutate(beta_group = (c.1/(h.1_group) - beta), alpha_group = (beta*(h.1_group) + c.1))
+
+
+    # covariate around active period
+    x <- runif(n=N, min=8, max=18)
+
+    inputs_for_sim <- split(simu_pars, simu_pars$transition) %>%
+        purrr::map(.f=function(y) {list("N" = N, "K" = K, "G" = G, "c" = unique(c(y$c.1, y$c.2)), "beta"=unique(y$beta), "beta_g" = unique(y$beta_group), "alpha_g" = unique(y$alpha_group), "group" = unique(y$group), "x" = x)})
+
+    return(list(pars=simu_pars, inputlist=inputs_for_sim, h=h_base))
+}
+
+simulation_input <- set_simulation_parameters()
+
+# simulate from models with identical transition points, but effects on alpha or beta
+
+simulate_data <- function(input, modification = "beta") {
+  # simulate data
+  if (effect == "beta") {
+    simu <- rstan::stan(file='simulate/covar_group_beta_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
+  } else {
+    simu <- rstan::stan(file='simulate/covar_group_alpha_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
+  }
+  # extract data from stan model
+simu_params <- data.frame(rstan::extract(simu)$y[1,,]) %>%
+  mutate(x = input$x) %>%
+  pivot_longer(cols = -x, names_to = "group", values_to = "y") %>%
+  extract(group, into = "group", regex = "([:digit:])") %>%
+  mutate(group = as.integer(group))
+  
+  # format data as input to another stan model
+
+  input_data_for_model <- list("N" = input$N * input$G, "K" = input$K, "G" = input$G, "x" = simu_params$x, "y" = simu_params$y, "group" = simu_params$group)
+  
+  return(input_data_for_model)
+}
+
+
+simdat_beta <- map(simulation_input$inputlist, simulate_data, modification = "beta")  
+names(simdat_beta) <- paste(names(simdat_beta), "beta")
+simdat_alpha <- map(simulation_input$inputlist, simulate_data, modification = "alpha")
+names(simdat_alpha) <- paste(names(simdat_alpha), "alpha")
+simdat <- list()
+simdat <- append(simdat, simdat_beta)
+simdat <- append(simdat, simdat_alpha)
+
+# Plot simulated data to make sure it's reasonable
+plot_simulated_data <- function(simdat, simulation_input) {
+    # format for plotting
+    simdf <- purrr::map(simdat, .f = function(x) {x[c("x", "y", "group")]}) %>%
+        purrr::map_dfr(.f = bind_rows, .id=".id")
+
+    # scatterplot
+    p1 <- ggplot(simdf, aes(x=x, y=y)) +
+        geom_jitter(shape=1, height=0.1, alpha=0.5) +
+        ggtitle("Simulated data") +
+        facet_grid(group ~ .id)
+
+    # cumulative plot
+    p2 <- ggplot(simdf, aes(x=x, colour=as.factor(y))) +
+        stat_ecdf() +
+        theme(legend.position = "none") +
+        ggtitle("Cumulative x for 3 states") +
+        facet_grid(group ~ .id)
+
+    cowplot::plot_grid(p1, p2, nrow=2)
+}
+
+plot_simulated_data(simdat, simulation_input$inputlist)
+```
+
+# Recapture
+
+Can the parameter values be recaptured when a model with an induced dirichlet prior for the cut points is used?
+
+```{r params}
+
+beta_rate <- c(1:3) # rate parameters for exponential prior on beta
+anchor <- c(5, 10) # different anchor parameters for induced dirichlet prior
+
+# make a nice dataframe with all combinations params used to simulate data and model params used to try to recover those params
+# 
+
+transition <- simulation_input$pars %>% 
+  select(transition) %>%
+  distinct()
+
+parframe_indir <- merge(transition, y=beta_rate) %>%
+    rename(beta_rate=y) %>%
+    merge(y=anchor) %>%
+    rename(anchor=y) 
+parframe_indir$modelid <- 1:nrow(parframe_indir)
+
+# format parframe so it works with parLapply better
+make_parframe_list <- function(parframe) {
+    parlist <- split(parframe, seq(nrow(parframe)))
+    names(parlist) <- parframe$modelid
+
+    return(parlist)
+}
+parlist_indir <- make_parframe_list(parframe_indir)
+```
+
+```{r indirRecapture, include=FALSE}
+# fit a model with an induced dirichlet prior on cutpoints in stan. simdatlist is a list of simulated data (1 simulated dataset per list entry), pars is a list of parameter values (1 set of parameter values per list entry) and groups is TRUE or FALSE indicating whether you're trying to fit groups.
+fit_indir_model <- function(simdatlist, pars, modification) {
+    #choose whether to use data simulated with a rapid or slow transition
+    if (pars$transition == "medium") {
+        simdat <- simdatlist$medium
+    }
+    if (pars$transition == "fast") {
+        simdat <- simdatlist$fast
+    }
+    #extract parameters for prior distributions
+    simdat$anchor <- pars$anchor
+    simdat$beta_rate <- pars$beta_rate
+
+    #fit the model
+    if (modification == "beta") {
+        fitindir <- stan(file='induced_dirichlet/dirichlet_covar_beta_group.stan', data=simdat, chains=4)
+    } else {
+        fitindir <- stan(file='induced_dirichlet/dirichlet_covar_alpha_group.stan', data=simdat, chains=4)
+    }
+    return(fitindir)
+}
+
+# run all models, parallelized
+
+# make a cluster using half your cores
+no_cores <- parallel::detectCores()/2
+cl <- parallel::makeCluster(no_cores)
+
+# export the stuff you need to run on the cluster
+parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_beta", "simdat_alpha"))
+parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
+
+reps=10
+for (i in 1:reps) {
+  fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_beta, pars=x, modification="beta")})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/beta_dat_beta_mod/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
+  
+    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_beta, pars=x, modification="alpha")})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/beta_dat_alpha_mod/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
+  
+    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x, modification="beta")})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_beta_mod/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
+  
+    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x, modification="alpha")})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
+}
+
+parallel::stopCluster(cl) #close the cluster
+
+```
+
+```{r readIndirModels, warning=FALSE, cache=TRUE}
+
+# pull in parameters and info on divergences, etc from saved stanfit objects
+# very slow step. consider parallelizing to the extent your ram can handle
+# 
+## append a label (string) to all columnnames in a dataframe (x)
+label_names <- function(x, label) {
+    colnames(x) <- paste0(colnames(x), "_", label)
+    return(x)
+}
+
+#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df
+bind_true_model_pars <- function(fits, parlist) {
+    # extract params from model object
+    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
+
+    # label params as coming from the model or as true params used to
+    params <- map(params, label_names, label="model")
+    parlist <- map(parlist, label_names, label="true")
+
+    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
+    params <- map2(params, parlist, cbind)
+
+    return(params)
+}
+
+# take a stan object and find out if there's anything egregiously wrong with it
+check_model <- function(stanobj) {
+    nuts <- nuts_params(stanobj)
+    divergences <- dplyr::filter(nuts, Parameter=="divergent__" & Value==1) %>%
+        nrow()
+    rhats <- rhat(stanobj)
+    bad_rhats <- sum(rhats > 1.01)
+    nefrats <- neff_ratio(stanobj)
+    bad_neff <- sum(nefrats < 0.1, is.nan(nefrats), na.rm=TRUE)
+    diagnostics <- data.frame(divergences = divergences, bad_rhats=bad_rhats, bad_neff=bad_neff)
+    return(diagnostics)
+}
+
+# run check_model on a list of models and add a column that names each row by the list name
+check_list_of_models <- function(model_list) {
+    map_dfr(model_list, check_model, .id=".id") %>%
+        rename(modelid=.id)
+}
+
+# Extract model configurations and the most obvious problems with fit/convergence from stanfit objects. Stanfit objects are in lists in .rds files saved in path. path is a string denoting the directory where the rds files are stored. Nothing other than .rds files with lists of stanfit objects should be stored in path.
+extract_pars_and_problems <- function(path, parlist) {
+    fits <- list.files(path=path)
+    reps <- length(fits)
+    pars <- list()
+    bad_models <- list()
+
+    for (i in 1:reps) {
+        run <- readRDS(paste0(path, fits[i])) # read in first run of 27 models
+        run_pars <- bind_true_model_pars(run, parlist=parlist) # extract parameters
+        run_fit <- check_list_of_models(run) %>% # id problems
+            mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
+            filter(all_bads > 0) %>%
+            select(-all_bads)
+        pars[[i]] <- run_pars
+        bad_models[[i]] <- run_fit
+        rm(run, run_pars, run_fit)
+        gc()
+    }
+
+    return(list(pars = pars, problems = bad_models))
+}
+
+extracts_indir_beta_alpha <- extract_pars_and_problems(path="induced_dirichlet/group_runs/beta_dat_alpha_mod/", parlist=parlist_indir)
+extracts_indir_beta_beta <- extract_pars_and_problems(path="induced_dirichlet/group_runs/beta_dat_beta_mod/", parlist=parlist_indir)
+```
+
+
+```{r indirModelCheck}
+problems_indir_ba <- extracts_indir_beta_alpha$problems %>%
+  map_dfr(bind_rows, .id=".id") %>%
+  rename(run=.id) %>%
+  group_by(modelid) %>%
+  summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
+  
+knitr::kable(problems_indir_ba, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1 - induced dirichlet")
+
+problems_indir_bb <- extracts_indir_beta_beta$problems %>%
+  map_dfr(bind_rows, .id=".id") %>%
+  rename(run=.id) %>%
+  group_by(modelid) %>%
+  summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
+
+knitr::kable(problems_indir_bb, caption = "Models with divergences, rhats > 1, or neff_ratios < 0.1 - induced dirichlet")
+
+```
