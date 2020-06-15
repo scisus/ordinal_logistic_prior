@@ -3,7 +3,7 @@
 data {
   int<lower=1> N;
   int<lower=2> K;
-  int<lower=1> G;
+  int<lower=2> G;
 
   positive_ordered[K-1] c; //cutpoints
   real beta; //slope
