@@ -513,21 +513,21 @@ ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid),
 
 ```
 
-When transitions are fast, no anchor allows $\beta$ and $c$ to be recaptured, but half transition points $h$ are (but $h_2$ isn't ever captured in 50% HPDI, only 90%). 
+When transitions are fast, no anchor allows $\beta$ and $c$ to be recaptured, but half transition points $h$ are (but $h_2$ isn't ever captured in 50% HPDI, only 90%). A larger anchor might help with this since cutpoints here are 20 and 30.
 
-When transitions are medium speed, a large anchor allows all parameters to be recaptured in the 90% HPDI. Any anchor allows $h$ to be recaptured in the 90%, but $h_2$, again, is never captured in the 50%.
+When transitions are medium speed, a large anchor allows all parameters to be recaptured in the 90% HPDI. Any anchor allows $h$ to be recaptured in the 90%, but $h_2$, again, is never captured in the 50%. Cutpoints are 10 and 15 here. A slightly larger anchor may help here as well.
 
 When transitions are slow, $h2$ is never recaptured, but all other parameters are recaptured in the 90% HPDI. $\beta$ is recaptured better when anchors are lower, $c_1$ is captured better when anchor is 5, and $h_1$ is captured better when anchors are large (10).
 
 ### Interpretation
 
-$c_1$ are `5`, `10`, and `20` for slow, medium, and fast transition datasets, respectively. Models were tried with anchors at `0`, `5`, and `10`. Models perform best when anchors are below - but not too far below - $c_1$. I think the dataset with a fast transition is so hard to fit a model to because an anchor of `10` is too far away from a $c_1$ at `20`. The model *does* recapture $c$:$\beta$. Since $c$ is underestimated, $\beta$ ends up being underestimated as well to preserve the ratio.
+$c_1$ are `5`, `10`, and `20` for slow, medium, and fast transition datasets, respectively. Models were tried with anchors at `0`, `5`, and `10`. I think the dataset with a fast transition is so hard to fit a model to because an anchor of `10` is too far away from a $c_1$ at `20`. The model *does* recapture $c$:$\beta$. Since $c$ is underestimated, $\beta$ ends up being underestimated as well to preserve the ratio.
 
-A model with an induced dirichlet prior is most likely to estimate parameter values correctly when the anchor is near the first cutpoint.
+The induced dirichlet prior assumes the cutpoints are centered around the anchor. If I think reasonable ranges for my cutpoints are $\beta * h_1 = 1*10$ to $\beta * h_2 = 2*15$, then `20` might be a reasonable anchor. If I think the range is wider ($\beta * h_1 = 0.5 * 10$ to $\beta * h_2 = 3*15$), I'm not sure what a reasonable anchor might be. When $\beta=0.5$, the model never recaptured $h_2$. The anchor might struggle to pull small enough cutpoints - and have a small enough distance between cutpoints if $\beta$ is small and the anchor is large.
 
 ### Best prior parameter choices
 
-I'm not sure! The model seems pretty fussy about having an anchor in the vicinity of the first cutpoint, which is quite hard to know.
+I'm not sure! I think `20` to `25` is probably reasonable given what I know about the system.
 
 # Gamma vs induced dirichlet prior on the cutpoints
 
@@ -535,7 +535,7 @@ I might be fighting more fit problems in Stan with a gamma prior than an induced
 
 On the other hand, my data doesn't have a slow transition - but I could *make* it have a slow transition by re-scaling $x$.
 
-Given what I found here, I think that a gamma prior is a better option for me. It definitely recaptured the parameters more often. I can use my domain specific knowledge around the potential range of $h$ and $\beta$ to choose a gamma distribution wide enough to cover a reasonable cutpoint range.
+<!-- Given what I found here, I think that a gamma prior is a better option for me. It definitely recaptured the parameters more often. I can use my domain specific knowledge around the potential range of $h$ and $\beta$ to choose a gamma distribution wide enough to cover a reasonable cutpoint range. -->
 
 This model seems fussy and I'm concerned about how it's going to behave when I increase the complexity from $\beta x$ to something like $(\beta + \beta_{site} + \beta_{prov} + \beta_{clone}) x$
 
