@@ -42,7 +42,7 @@ set_simulation_parameters <- function(N=100) {
 }
 
 # simulate data from an ordinal logistic model and format it as input for stan. input is a list for stan, as is output. groups is TRUE or FALSE
-simulate_data <- function(input, prior, groups) {
+simulate_data <- function(input, groups) {
     # simulate data
     if (isTRUE(groups)) {
         simu <- rstan::stan(file='simulate/covar_group_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
