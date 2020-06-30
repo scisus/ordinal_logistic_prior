@@ -173,13 +173,25 @@ parframe_gam$modelid <- 1:nrow(parframe_gam) #label the models
 # format parframe so it works with parLapply better
 parlist_gam <- make_parframe_list(parframe_gam)
 
+# model parameterizations
+parameterizations_gam <- select(parframe_gam, gammaid, shape, cut_rate, beta_rate) %>%
+  distinct() %>%
+  arrange(gammaid, beta_rate)
+
+table_gam <- parframe_gam %>% 
+  select(transition, modelid, gammaid, beta_rate) %>%
+  group_by(transition, modelid, gammaid, beta_rate) %>%
+  tidyr::pivot_wider(names_from=transition, values_from=modelid) %>%
+  tidyr::unite("modelids", c("fast", "medium", "slow"), sep=", ", remove=TRUE) %>%
+  right_join(parameterizations_gam) %>%
+  select(modelids, gammaid, shape, cut_rate, beta_rate)
 
 ```
 
 So there are three simulated datasets - one for each of three transition speeds. I'm going to try to fit them both with three rates for the $\beta$'s exponential prior and three shape and rate combinations for the cut points' gamma prior, a total of 27 models. I'm going to do `r reps` runs of each model in Stan.
 
 ```{r paramsTableGamma}
-knitr::kable(parframe_gam, caption="Model parameterizations and simulated datasets used to try to recapture params - gamma")
+knitr::kable(table_gam, caption="Prior parameters - gamma prior models. modelids are unique identifiers for each combination of prior parameters and simulated datasets, in order from fast transition to slow transition dataset")
 ```
 
 
@@ -410,12 +422,25 @@ parframe_indir$modelid <- 1:nrow(parframe_indir)
 
 # format parframe so it works with parLapply better
 parlist_indir <- make_parframe_list(parframe_indir)
+
+# model parameterizations
+parameterizations_indir <- select(parframe_indir, anchor, beta_rate) %>%
+  distinct() %>%
+  arrange(anchor, beta_rate)
+
+table_indir <- parframe_indir %>%
+  select(transition, modelid, anchor, beta_rate) %>%
+  group_by(transition, modelid, anchor, beta_rate) %>%
+  tidyr::pivot_wider(names_from=transition, values_from=modelid) %>%
+  tidyr::unite("modelids", c("fast", "medium", "slow"), sep=", ", remove=TRUE) %>%
+  right_join(parameterizations_indir) %>%
+  select(modelids, anchor, beta_rate)
 ```
 
 I'm going to fit all three simulated datasets with each of the 3 rate prior parameters on beta and anchor parameters on the cutpoints.
 
 ```{r paramsTableIndir}
-knitr::kable(parframe_indir, caption="Model parameterizations used to try to recapture params - induced dirichlet")
+knitr::kable(table_indir, caption="Prior parameters - induced dirichlet prior models. modelids are unique identifiers for each combination of prior parameters and simulated datasets, in order from fast transition to slow transition dataset")
 ```
 
 ```{r indirRecapture, include=FALSE}
@@ -482,21 +507,39 @@ knitr::kable(noproblem_models_indir, caption="model parameterization-dataset com
 
 Slow transition models are least likely to have obvious problems.
 
+```{r}
+diag_indir <- diagnosis_framer(problems_indir, noproblem_models_indir)
+```
+
 ```{r indirExtract}
 
 # extract parameters from stan objects and pair with true param values
 params_indir <- extracts_indir$pars %>%
-  map_dfr(bind_rows, .id = ".id") %>%
+  purrr::map_dfr(bind_rows, .id = ".id") %>%
   rename(run=.id) %>%
-  split(.$modelid)
+  left_join(diag_gam, by=c("modelid_true" = "modelid"))
 
 ```
 
-Here is a selection of parameter distributions from all 30 runs of 5 random model fits. "True" values marked with vertical black lines.
+The models have pretty consistent estimates across runs, even when there are problems with model diagnostics, but they are pretty consistently wrong in their estimates - parameters are usually underestimated. Cutpoints are quite sensitive to the anchor. $h_1$ is estimated much better than $h_2$, which is always underestimated
 
-```{r plotIndirParams, fig.height=3, fig.width=4}
+```{r plotIndirParams}
 
-map(params_indir[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
+plot_densities_anchorxbeta <- function(modelpar, truepar) {
+  plot <- ggplot(params_indir, aes(x=get(modelpar), group=interaction(run, modelid_true), fill=transition_true, colour=transition_true, linetype=modeldiag)) +
+    geom_density(alpha=0.1) +
+    geom_vline(aes(xintercept=get(truepar), colour = transition_true), alpha=1) +
+    facet_grid(anchor_true ~ beta_rate_true) +
+    ggtitle(strsplit(modelpar, split = "_model"), subtitle = "facet rows are anchor, cols are beta prior param")
+  print(plot)
+}
+
+plot_densities_anchorxbeta("c.1_model", "c.1_true")
+plot_densities_anchorxbeta("c.2_model", "c.2_true")
+plot_densities_anchorxbeta("beta_model", "beta_true")
+
+plot_densities_anchorxbeta("h1_model", "h1_true")
+plot_densities_anchorxbeta("h2_model", "h2_true")
 
 ```
 
@@ -507,53 +550,40 @@ Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by t
 ```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 # calculate whether true value is in HPDI
 
-recaptured_indir <- which_params_recaptured(params_indir)
-prop_recaptured_indir <- calc_prop_recaptured_overall(recaptured_indir, truepars=parframe_indir)
-prop_recaptured_by_param_indir <- calc_recaptured_by_param(recaptured_indir, parframe_indir) 
+recaptured_indir <- params_indir %>% # are parameter estimates in the 50 or 90% HPDI?
+  select(-modeldiag) %>%
+  split(.$modelid) %>%
+  which_params_recaptured()
+prop_recaptured_indir <- calc_num_recaptured_overall(recaptured_indir, truepars=parframe_indir)
+prop_recaptured_by_param_indir <- calc_recaptured_by_param(recaptured_indir, parframe_indir) %>%
+  purrr::map_dfr(bind_rows, .id=".id")
 
 ```
 
 ```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=4}
-ggplot(prop_recaptured_indir$fifty, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c(limits=c(0,5)) +
-  ylab("beta_rate")
 
-ggplot(prop_recaptured_indir$ninety, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c(limits=c(0,5)) +
-  ylab("beta_rate")
+ggplot(prop_recaptured_indir$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
+geom_bar(stat="identity") +
+geom_bar(prop_recaptured_indir$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
+facet_grid(anchor ~ beta_rate) +
+ylim(c(0,5)) +
+ggtitle("Mean # of parameters captured in 50% and 90% HPDI")
+
 ```
 
-Using an induced dirichlet prior on the cutpoints doesn't seem to work very well.
+Using an induced dirichlet prior on the cutpoints doesn't seem to work very well. Most parameters just aren't recaptured most of the time.
 
 Which parameters are easier or harder to recapture?
 
 ```{r plotIndirRecapture}
 
-ggplot(prop_recaptured_by_param_indir$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset \n with anchor and beta rate labels") +
-  theme(legend.position = "top") +
-  ylab("model id")
-
-ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with anchor and beta rate labels") +
-  theme(legend.position = "top") +
-  ylab("model id")
+ggplot(dplyr::filter(prop_recaptured_by_param_indir, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_bar(dplyr::filter(prop_recaptured_by_param_indir, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
+  facet_grid(anchor  ~ transition + beta_rate) +
+  ylim(c(0,1)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI", subtitle = "facet columns are transition and beta rate, rows are anchors") +
+  theme(legend.position = "top")
 
 ```
 
@@ -581,26 +611,11 @@ On the other hand, my data doesn't have a slow transition - but I could *make* i
 
 <!-- Given what I found here, I think that a gamma prior is a better option for me. It definitely recaptured the parameters more often. I can use my domain specific knowledge around the potential range of $h$ and $\beta$ to choose a gamma distribution wide enough to cover a reasonable cutpoint range. -->
 
-This model seems fussy and I'm concerned about how it's going to behave when I increase the complexity from $\beta x$ to something like $(\beta + \beta_{site} + \beta_{prov} + \beta_{clone}) x$
+This model seems fussy and I'm concerned about how it's going to behave when I increase the complexity from $\beta x$ to something like $\beta x +  \alpha_{site} + \alpha_{prov} + \alpha_{clone})$.
+
+## tl;dr
+
+Ordinal logistic models with gamma priors have fit issues and ordinal logistic models with dirichlet priors can't recapture the parameters. If fit/stan diagnostic issues can be dealt with enough for the gamma prior, it may be workable. But things will likely explode when adding groups.
 
 
-```{r compare}
 
-ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Gamma prior", subtitle="Proportion of parameters recaptured in 90% HPDI") +
-  theme(legend.position = "top") +
-  ylab("model id")
-
-ggplot(prop_recaptured_by_param_indir$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Induced dirichlet prior", subtitle="Proportion of parameters recaptured in 90% HPDI") +
-  theme(legend.position = "top") +
-  ylab("model id")
-```
