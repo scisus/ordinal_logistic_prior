@@ -24,6 +24,8 @@ library(cowplot)
 library(testthat)
 library(parallel)
 library(purrr)
+library(tidyr)
+library(rethinking)
 ```
 
 ```{r depends}
@@ -115,7 +117,7 @@ writeLines(readLines("simulate/covar_sim.stan"))
 ```{r simulate_data}
 simulation_input <- set_simulation_parameters(N=500)
 
-simdat <- map(simulation_input$inputlist, simulate_data, groups=FALSE)
+simdat <- purrr::map(.x = simulation_input$inputlist, .f = simulate_data, groups=FALSE)
 
 plot_simulated_data(simdat, simulation_input$inputlist)
 
@@ -149,7 +151,7 @@ pars_gamma <- purrr::map(factors, make_gamma_pars, h=simulation_input$h)
 #plot gamma priors
 pars_gamma %>%
   # format for plotting
-  map(function(x) {rgamma(1000, x$shape, x$cut_rate)}) %>%
+  purrr::map(function(x) {rgamma(1000, x$shape, x$cut_rate)}) %>%
   bind_cols() %>%
   tidyr::pivot_longer(cols = names(factors)) %>%
   # plot
@@ -217,7 +219,7 @@ writeLines(readLines("gamma/gamma_covar.stan"))
 
 # pull in parameters and info on divergences, etc from saved stanfit objects
 
-extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/", parlist=parlist_gam)
+extracts_gam <- extract_pars_and_problems(path="gamma/covar_runs/", parlist=parlist_gam, reps=10)
 ```
 
 ## Model check
@@ -226,7 +228,7 @@ Here's a very cursory check for problems after fitting the models - divergences 
 
 ```{r gammaModelCheck}
 problems_gam <- extracts_gam$problems %>%
-  map_dfr(bind_rows, .id=".id") %>%
+  purrr::map_dfr(bind_rows, .id=".id") %>%
   rename(run=.id) %>%
   group_by(modelid) %>%
   summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
@@ -235,35 +237,73 @@ knitr::kable(problems_gam, caption = "Models with divergences, rhats > 1, or nef
 
 ```
 
-`r nrow(problems_gam)` out of 27 models had problems with Rhat or neff_ratio in 1-5 of the `r reps` model runs. That's not ideal. No divergences ever though. 
+`r nrow(problems_gam)` out of 27 models had problems with Rhat or neff_ratio in some number of the `r reps` model runs. That's not ideal. No divergences ever though. 
 
 
 ```{r gammaPrettyModels}
-noproblem_models_gam <- dplyr::filter(parframe_gam, !modelid %in% problems_gam$modelid)
+noproblem_models_gam <- dplyr::filter(parframe_gam, !modelid %in% problems_gam$modelid) %>% arrange( transition, gammaid)
 knitr::kable(noproblem_models_gam, caption="model parameterization-dataset combinations that never had a (very obvious) problem")
 ```
 
-Models with slow transition speeds were less likely to have problems. Slow transitions with "loose" priors on $\beta$ run into trouble - except when the cutpoints are highly constrained near the real values by a skinny gamma.
+Models with slow transition speeds were less likely to have problems. Slow transitions with "loose" priors on $\beta$ run into trouble fitting- except when the cutpoints are highly constrained near the real values by a skinny gamma.
+
+```{r}
+
+diagnosis_framer <- function(badframe, goodframe) {
+  bad <- select(badframe, modelid) %>%
+    mutate(modeldiag = "poor", modelid = as.integer(modelid))
+  
+  good <- select(goodframe, modelid) %>%
+    mutate(modeldiag = "good")
+  
+  diagnosis <- full_join(bad, good)
+  
+  return(diagnosis)
+}
+
+diag_gam <- diagnosis_framer(problems_gam, noproblem_models_gam)
+```
 
 ```{r gammaExtract}
 
 # extract parameters from stan objects and pair with true param values
 #params_gam <- bind_true_model_pars(fits_gam, parlist_gam)
 params_gam <- extracts_gam$pars %>%
-  map_dfr(bind_rows, .id = ".id") %>%
+  purrr::map_dfr(bind_rows, .id = ".id") %>%
   rename(run=.id) %>%
-  split(.$modelid)
+  left_join(diag_gam, by=c("modelid_true" = "modelid"))
 
 ```
 
-Here is a selection of parameter distributions from all 30 runs of 5 random model fits. "True" values marked with vertical black lines.
+## Parameter estimates
 
-```{r plotGammaParams, fig.height=3, fig.width=4}
+Parameter estimates for each run of each model are plotted below. 
 
-map(params_gam[sort(base::sample(1:27, 5))], parplot) # pick 5 models at random to plot
+As you can see, not all runs of the same model on the same data produce the same results.
+
+
+```{r plotGammaParams, fig.cap="Plots of parameter estimates from models with different values for the prior. Dotted lines show models with poor model diagnostics - Rhat too big, Neff too small, etc."}
+
+plot_densities_betaxgamma <- function(modelpar, truepar) {
+  plot <- ggplot(params_gam, aes(x=get(modelpar), group=interaction(run, modelid_true), fill=transition_true, colour=transition_true, linetype=modeldiag)) +
+    geom_density(alpha=0.1) +
+    geom_vline(aes(xintercept=get(truepar), colour = transition_true), alpha=1) +
+    facet_grid(gammaid_true ~ beta_rate_true) +
+    ggtitle(strsplit(modelpar, split = "_model"), subtitle = "facet rows are gamma prior param, cols are beta prior param")
+  print(plot)
+}
+
+plot_densities_betaxgamma("c.1_model", "c.1_true")
+plot_densities_betaxgamma("c.2_model", "c.2_true")
+plot_densities_betaxgamma("beta_model", "beta_true")
+
+plot_densities_betaxgamma("h1_model", "h1_true")
+plot_densities_betaxgamma("h2_model", "h2_true")
 
 ```
+Some model runs do not recapture parameters, even when (an admittedly naive consideration of) diagnostics are good. In some cases, it looks like the model is exploring two "sides" of the parameter space and missing the middle  (See cutpoint 1 graph slow transition - fat gamma, beta rate=1)
 
+While fast transition datasets lead to wider estimates of $\beta$ and $c$, they have narrower estimates of $h$. 
 ## Recapture rate
 
 Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by the model?
@@ -271,29 +311,29 @@ Of the 5 parameters ($\beta$, $c$ and derived $h$), how many are recaptured by t
 ```{r GammaHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 # calculate whether true values are in HPDI
 
-recaptured_gam <- which_params_recaptured(params_gam) # in or out
-prop_recaptured_gam <- calc_prop_recaptured_overall(recaptured_gam, parframe_gam) # average number of parameters recaptured by each model
-prop_recaptured_by_param_gam <- calc_recaptured_by_param(recaptured_gam, parframe_gam) #proportion of model runs where a parameter is returned correctly
+# recaptured_gam <- which_params_recaptured(params_gam) # in or out
 
+recaptured_gam <- params_gam %>% # are parameter estimates in the 50 or 90% HPDI?
+  select(-modeldiag) %>%
+  split(.$modelid) %>%
+  which_params_recaptured()
+  
+prop_recaptured_gam <- calc_num_recaptured_overall(recaptured_gam, parframe_gam) # average number of parameters recaptured by each model
+prop_recaptured_by_param_gam <- calc_recaptured_by_param(recaptured_gam, parframe_gam) %>% #proportion of model runs where a parameter is returned correctly
+  purrr::map_dfr(bind_rows, .id=".id")
 
 ```
 
 ```{r plotGammaRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=4}
-ggplot(prop_recaptured_gam$fifty, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c(limits=c(0,5)) +
-  ylab("beta_rate")
 
-ggplot(prop_recaptured_gam$ninety, aes(x=gammaid, y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c(limits=c(0,5)) +
-  ylab("beta_rate")
+
+ggplot(prop_recaptured_gam$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
+  geom_bar(stat="identity") +
+  geom_bar(prop_recaptured_gam$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
+  facet_grid(gammaid ~ beta_rate) +
+  ylim(c(0,5)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI")
+
 ```
 
 Most models return all parameters in the 90% HPDI, but a skinny gamma prior makes it harder to return parameters, especially when $\beta$ deviates from 1. 
@@ -304,37 +344,29 @@ Which parameters are easier or harder to recapture?
 
 ```{r plotGammaRecapture, caption="Proportion of model runs where the HDPI contains the true parameter value"}
 
-ggplot(prop_recaptured_by_param_gam$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
-  theme(legend.position = "top") +
-  ylab("model id")
+  
+ggplot(dplyr::filter(prop_recaptured_by_param_gam,.id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
+  geom_bar(stat="identity", position="dodge") +
+ geom_bar(dplyr::filter(prop_recaptured_by_param_gam, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
+  facet_grid(gammaid  ~ transition + beta_rate) +
+  ylim(c(0,1)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI") +
+  theme(legend.position = "top")
 
-ggplot(prop_recaptured_by_param_gam$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(gammaid, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with gamma shape and beta rate labels") +
-  theme(legend.position = "top") +
-  ylab("model id")
 
 ```
 
 $\beta$ and $c$ are never recaptured in the 50% HPDI when the real $\beta$ is slow, but they are usually recaptured in the 90% HPDI, except when the gamma prior on cutpoints is skinny.
 
-A skinny gamma prior centered in between the transition points makes it difficult to recapture $\beta$ and $c$ across the board, unless $\beta$ is near 1 (See models 3,6,9, 21, 24, 27). 
+A skinny gamma prior centered in between the transition points makes it difficult to recapture $\beta$ and $c$ across the board, unless $\beta$ is near 1 (See "medium" models). 
 
-$\lambda$ choice doesn't seem to matter very much, but when transition speed is fast, a too loose $\lambda$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight beta rate might make estimates worse.
+$\lambda$ (rate parameter for the exponential prior on $\beta$) choice doesn't seem to matter very much, but when transition speed is fast, a too loose (*i.e* small) $\lambda$ makes it harder to recapture $\beta$ and $c$. When transitions are slow, a too tight (*i.e* large) $\lambda$ might make estimates worse.
 
 ### Half transition points $h$
 
 Both $h$ are always captured in the 90% HPDI, even when $\beta$ and $c$ are not recaptured. So the *ratio* between $\beta$ and $c$ is being captured, even when the actual values of those parameters aren't.
 
-$h_2$ is estimated best (*i.e* in 50% HPDI) when transitions are fast and $h_1$ is estimated best when transitions are slow. 
+$h_2$ is estimated best (*i.e* in 50% HPDI) when transitions are fast and $h_1$ is estimated best when transitions are slow. This suggests 
 
 Good estimates for $\beta$ and $c$ are correlated with worse estimates for $h$. This is a concerning tradeoff.
 
@@ -423,7 +455,7 @@ writeLines(readLines("induced_dirichlet/dirichlet_covar.stan"))
 # pull in parameters and info on divergences, etc from saved stanfit objects
 # very slow step. consider parallelizing to the extent your ram can handle
 
-extracts_indir <- extract_pars_and_problems(path="induced_dirichlet/covar_runs/", parlist=parlist_indir)
+extracts_indir <- extract_pars_and_problems(path="induced_dirichlet/covar_runs/", parlist=parlist_indir, reps=10)
 ```
 
 ## Model check
@@ -432,7 +464,7 @@ Do a dangerously cursory check for model problems - divergences and issues with 
 
 ```{r indirModelCheck}
 problems_indir <- extracts_indir$problems %>%
-  map_dfr(bind_rows, .id=".id") %>%
+  purrr::map_dfr(bind_rows, .id=".id") %>%
   rename(run=.id) %>%
   group_by(modelid) %>%
   summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))

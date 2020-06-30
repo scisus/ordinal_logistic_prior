@@ -169,11 +169,11 @@ bind_true_model_pars <- function(fits, parlist) {
     params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
 
     # label params as coming from the model or as true params used to
-    params <- map(params, label_names, label="model")
-    parlist <- map(parlist, label_names, label="true")
+    params <- purrr::map(params, label_names, label="model")
+    parlist <- purrr::map(parlist, label_names, label="true")
 
     # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
-    params <- map2(params, parlist, cbind)
+    params <- purrr::map2(params, parlist, cbind)
 
     return(params)
 }
@@ -193,14 +193,18 @@ check_model <- function(stanobj) {
 
 # run check_model on a list of models and add a column that names each row by the list name
 check_list_of_models <- function(model_list) {
-    map_dfr(model_list, check_model, .id=".id") %>%
+    purrr::map_dfr(model_list, check_model, .id=".id") %>%
         rename(modelid=.id)
 }
 
 # Extract model configurations and the most obvious problems with fit/convergence from stanfit objects. Stanfit objects are in lists in .rds files saved in path. path is a string denoting the directory where the rds files are stored. Nothing other than .rds files with lists of stanfit objects should be stored in path.
-extract_pars_and_problems <- function(path, parlist) {
+extract_pars_and_problems <- function(path, parlist, reps) {
     fits <- list.files(path=path)
+    if (reps < length(fits)) {
+        reps <- reps
+    } else {
     reps <- length(fits)
+    }
     pars <- list()
     bad_models <- list()
 
@@ -209,7 +213,7 @@ extract_pars_and_problems <- function(path, parlist) {
         run_pars <- bind_true_model_pars(run, parlist=parlist) # extract parameters
         run_fit <- check_list_of_models(run) %>% # id problems
             mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
-            filter(all_bads > 0) %>%
+            dplyr::filter(all_bads > 0) %>%
             select(-all_bads)
         pars[[i]] <- run_pars
         bad_models[[i]] <- run_fit
@@ -218,6 +222,19 @@ extract_pars_and_problems <- function(path, parlist) {
     }
 
     return(list(pars = pars, problems = bad_models))
+}
+
+
+diagnosis_framer <- function(badframe, goodframe) {
+    bad <- select(badframe, modelid) %>%
+        mutate(modeldiag = "poor", modelid = as.integer(modelid))
+
+    good <- select(goodframe, modelid) %>%
+        mutate(modeldiag = "good")
+
+    diagnosis <- full_join(bad, good)
+
+    return(diagnosis)
 }
 
 HPDIlow <- function(x, prob) {
@@ -233,7 +250,7 @@ HPDIhigh <- function(x, prob) {
 calc_HPDI <- function(params, prob) {
     params <- params %>%
         tidyr::pivot_longer(ends_with("model"), names_to = "param", values_to = "param_value") %>%
-        filter(param != "lp___model") %>%
+        dplyr::filter(param != "lp___model") %>%
         tidyr::separate(param, into="param", sep="_") %>% # drop model ending
         rename(modelid=modelid_true)
 
@@ -267,24 +284,24 @@ calc_HPDI <- function(params, prob) {
 # For each parameter (5) in each model (27) in each run (30), is a given parameter in the 50% or 90% HPDI? modelpars is a list of dataframes. Each dataframe in the list contains parameters from 30 runs of 1 model along with the true parameters used to simulate the datasets.
 # output is a list of 2 dataframes 4050 rows each (5x27x30) - with each parameter estimated by the model and an inint column with TRUE if it falls in the HPDI interval and FALSE if not.
 which_params_recaptured <- function(modelpars) {
-    in50 <- map(modelpars, calc_HPDI, prob=0.5)
+    in50 <- purrr::map(modelpars, calc_HPDI, prob=0.5)
 
-    #in75 <- map(params_indir, calc_HPDI, prob=0.75)
+    #in75 <- purrr::map(params_indir, calc_HPDI, prob=0.75)
 
-    in90 <- map(modelpars, calc_HPDI, prob=.90)
+    in90 <- purrr::map(modelpars, calc_HPDI, prob=.90)
 
     # recaptured parameters (refactor this later so it's all in one df
-    perform50 <- map_dfr(in50, bind_rows)
-    perform90 <- map_dfr(in90, bind_rows)
+    perform50 <- purrr::map_dfr(in50, bind_rows)
+    perform90 <- purrr::map_dfr(in90, bind_rows)
 
     return(list(fifty = perform50, ninety=perform90))
 }
 
 # calculate the proportion of parameters recaptured (averaged across runs) by each model
-calc_prop_recaptured_overall <- function(inint, truepars) {
+calc_num_recaptured_overall <- function(inint, truepars) {
 
     # proportion of parameters recaptured
-    prop_recaptured50 <- inint$fifty %>%
+    num_recaptured50 <- inint$fifty %>%
         group_by(modelid, run) %>%
         summarise(captured = sum(inint)) %>%
         summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
@@ -292,14 +309,14 @@ calc_prop_recaptured_overall <- function(inint, truepars) {
         arrange(beta, desc(mean_captured))
 
 
-    prop_recaptured90 <- inint$ninety %>%
+    num_recaptured90 <- inint$ninety %>%
         group_by(modelid, run) %>%
         summarise(captured = sum(inint)) %>%
         summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
         full_join(truepars) %>%
         arrange(beta, desc(mean_captured))
 
-    return(list(fifty = prop_recaptured50, ninety = prop_recaptured90))
+    return(list(fifty = num_recaptured50, ninety = num_recaptured90))
 }
 
 # for each model type, in what proportion of runs is a given parameter returned correctly
