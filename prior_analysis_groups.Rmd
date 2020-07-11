@@ -12,6 +12,10 @@ output:
       smooth_scroll: true
 ---
 
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message=FALSE)
+```
+
 ```{r}
 library(dplyr)
 library(rstan)
@@ -19,12 +23,23 @@ library(tidyr)
 library(purrr)
 library(cowplot)
 library(bayesplot)
+library(ggplot2)
 
 rstan_options(auto_write=TRUE)
 ```
+
+```{r depends}
+source('prior_analysis_groups_functions.R')
+```
+
+```{r global}
+# each version of a model should be run how many times?
+reps <- 5
+```
+
 # Background
 
-[Previously](https://scisus.github.io/ordinal_logistic_prior/prior_analysis.html), I considered whether a gamma or an induced dirichlet prior on cut points in an ordinal logistic model worked better for the kind of data I'm considering.
+[Previously](https://scisus.github.io/ordinal_logistic_prior/prior_analysis.html), I considered whether a gamma or an induced dirichlet prior on cut points in an ordinal logistic model worked better for the kind of data I'm considering. Neither was very promising, but because of problems with convergence, etc. in models with the gamma prior, I'm testing group effects with the induced dirichlet.
 
 In this model, the state of flowering depends on how many forcing units have accumulated. 
 
@@ -34,99 +49,50 @@ $x$ is accumulated forcing: when flowering was observed, how much warmth had the
 
 $\beta$ describes how fast the transition occurs - small $\beta$s make the transition from between states occur over a wider range of $x$'s. (Translated from forcing units to days, this answers a question like "does the population transition between states over 1 day, 3 days, a week?" We work in forcing unit space because the trees respond to temperature, not time - and no spring heats up exactly the same so dates are kind of useless for prediction.) $\beta$ is always positive.
 
-A gamma prior on cut points that's got a distribution fat enough to encompass the entire possible range of cut points worked well. An induced dirichlet prior on cut points only works well when it is anchored near the first cut point and when cut points are relatively close together. While the model with an induced dirichlet prior can struggle to recapture $\beta$ and cut points $c$, it is pretty good at capturing the relationship between $\beta$ and $c$: $h = \frac{c}{\beta}$, which is the point at which half the trees in a population have transitioned or the point at which an individual tree is 50% likely to have transitioned. 
+In [the case without groups](https://scisus.github.io/ordinal_logistic_prior/prior_analysis.html), an ordinal logistic model with an induced dirichlet prior on cutpoints can struggle to recapture $\beta$ and cut points $c$, but it is pretty good at capturing the relationship between $\beta$ and $c$: $h = \frac{c}{\beta}$, which is the point at which half the trees in a population have transitioned or the point at which an individual tree is 50% likely to have transitioned. 
 
-In the previous analysis, no groups were considered. In reality, I want to know if site, provenance, and clone affect $h$.
+In the previous analysis, no groups were considered. In reality, I want to know if things like site, provenance, and clone affect $h$.
 
 ## Goals
 1 - Generate data with an ordinal logistic model 
- a - With linear model structure $(\beta + \beta_{site_i}) x$
- b - With linear model structure $\beta x + \alpha$
-2 - Fit both models
-3 - Determine whether $\beta$, \beta_{site_i}$, \alpha$, $c$, or $h$ can be returned.
+   - With linear model structure $\beta x + \alpha$
+2 - Fit model with Stan
+3 - Determine whether $\beta$, $\beta_{site_i}$, \alpha$, $c$, or $h$ can be returned.
 
-# Simulate site effects
 
-Let's simulate 7 groups with `N=100` observations for each group. Each group's $h$ are shifted by $h_mod$, which is drawn from a standard normal distribution.
+I'll simulate data for 10 groups with `N=100` observations for each group. Each group's $h$ are shifted by $h_mod$, which is drawn from a $\mathcal{N}(0,\sigma)$. Data is simulated for two transition speeds, $\beta=1$ and $\beta=2$.
+
+First we'll do this with null effects ($\sigma=0$), then with a relatively large range of effects (\sigma = 1).
+
+# Can null group effects be detected?
+
+Simulate data from an ordinal logistic model where there are 10 groups, but none of the groups have an effect.
+
+The Stan model for data simulation is:
 
 ```{r}
-hist(rnorm(1000), breaks=20)
+writeLines(readLines("simulate/covar_group_alpha_sim.stan"))
 ```
+Plots of simulated data for each group should look roughly identical.
+
+```{r nullGroupSimulation, fig.height=11, fig.width=5, fig.cap="Simulated data in each group. Since groups have no effect in test, all groups should look more or less identical.}
+
+G = 10
+h_mod0 <- rep(0, G)
+
+simulation_input <- set_simulation_parameters(G=G, hmod=h_mod0)
 
 
-```{r group simulation}
+simdat_alpha <- purrr::map(.x=simulation_input$inputlist, .f=simulate_data)
 
-
-
-#h_mod <- rnorm(G=7, 0, hsd=1) # how much being in each group modifies half transitions
-h_mod <- c(  0.35, -0.52, -1.32, -0.72, -0.78,  0.73, -0.45)
-simulation_input <- set_simulation_parameters()
-
-# simulate from models with identical transition points, but effects on alpha or beta
-
-simulate_data <- function(input, modification) {
-  # simulate data
-  if (modification == "beta") {
-    simu <- rstan::stan(file='simulate/covar_group_beta_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
-  } 
-  if (modification == "alpha") {
-    simu <- rstan::stan(file='simulate/covar_group_alpha_sim.stan', iter=1, chains=1, algorithm="Fixed_param", data=input)
-  }
-  
-  # extract data from stan model
-  simu_params <- data.frame(rstan::extract(simu)$y[1,,]) %>%
-    mutate(x = input$x) %>%
-    pivot_longer(cols = -x, names_to = "group", values_to = "y") %>%
-    extract(group, into = "group", regex = "([:digit:])") %>%
-    mutate(group = as.integer(group))
-  
-  # format data as input to another stan model
-  
-  input_data_for_model <- list("N" = input$N * input$G, "K" = input$K, "G" = input$G, "x" = simu_params$x, "y" = simu_params$y, "group" = simu_params$group)
-  
-  return(input_data_for_model)
-}
-
-
-  
-
-simdat_beta <- map(simulation_input$inputlist, simulate_data, modification = "beta")  
-names(simdat_beta) <- paste(names(simdat_beta), "beta")
-simdat_alpha <- map(simulation_input$inputlist, simulate_data, modification = "alpha")
-names(simdat_alpha) <- paste(names(simdat_alpha), "alpha")
-# simdat <- list()
-# simdat <- append(simdat, simdat_beta)
-# simdat <- append(simdat, simdat_alpha)
-
-# Plot simulated data to make sure it's reasonable
-plot_simulated_data <- function(simdat, simulation_input) {
-    # format for plotting
-    simdf <- purrr::map(simdat, .f = function(x) {x[c("x", "y", "group")]}) %>%
-        purrr::map_dfr(.f = bind_rows, .id=".id")
-
-    # scatterplot
-    p1 <- ggplot(simdf, aes(x=x, y=y)) +
-        geom_jitter(shape=1, height=0.1, alpha=0.5) +
-        ggtitle("Simulated data") +
-        facet_grid(group ~ .id)
-
-    # cumulative plot
-    p2 <- ggplot(simdf, aes(x=x, colour=as.factor(y))) +
-        stat_ecdf() +
-        theme(legend.position = "none") +
-        ggtitle("Cumulative x for 3 states") +
-        facet_grid(group ~ .id)
-
-    cowplot::plot_grid(p1, p2, nrow=2)
-}
-
-plot_simulated_data(simdat_beta, simulation_input$inputlist)
 plot_simulated_data(simdat_alpha, simulation_input$inputlist)
 ```
 
-# Recapture
+## Estimate parameters
 
-Can the parameter values be recaptured when a model with an induced dirichlet prior for the cut points is used?
+Next we'll check whether models can accurately recapture parameters. Based on findings from the no-group investigation, we'll create models with an exponential prior on $\beta$ with a rate of 1, 2, or 3 and the anchor for the dirichlet inducing the priors on cutpoints at 10 and 20. 
+
+
 
 ```{r params}
 
