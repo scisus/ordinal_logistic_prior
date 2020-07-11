@@ -75,7 +75,7 @@ writeLines(readLines("simulate/covar_group_alpha_sim.stan"))
 ```
 Plots of simulated data for each group should look roughly identical.
 
-```{r nullGroupSimulation, fig.height=11, fig.width=5, fig.cap="Simulated data in each group. Since groups have no effect in test, all groups should look more or less identical.}
+```{r nullGroupSimulation, fig.height=11, fig.width=5, fig.cap="Simulated data in each group. Since groups have no effect in test, all groups should look more or less identical."}
 
 G = 10
 h_mod0 <- rep(0, G)
@@ -139,24 +139,24 @@ I'm going to do `r reps` runs of each of the 12 models in Stan.
 ```{r indirRecapture, include=FALSE}
 
 
-# run all models, parallelized
-
-# make a cluster using half your cores
-no_cores <- parallel::detectCores()/2
-cl <- parallel::makeCluster(no_cores)
-
-# export the stuff you need to run on the cluster
-parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alpha"))
-parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
-
-for (i in 1:reps) {
-    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x, modification="alpha")})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/run", i, ".rds"))
-  rm(fits_indir)
-  gc()
-}
-
-parallel::stopCluster(cl) #close the cluster
+# # run all models, parallelized
+# 
+# # make a cluster using half your cores
+# no_cores <- parallel::detectCores()/2
+# cl <- parallel::makeCluster(no_cores)
+# 
+# # export the stuff you need to run on the cluster
+# parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alpha"))
+# parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
+# 
+# for (i in 1:reps) {
+#     fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x})
+#   saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/run", i, ".rds"))
+#   rm(fits_indir)
+#   gc()
+# }
+# 
+# parallel::stopCluster(cl) #close the cluster
 
 ```
 
@@ -177,7 +177,10 @@ Models have very serious problems (divergences, large rhats, low effective sampl
 
 
 dirs <- list.dirs("induced_dirichlet/group_runs/")
-extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/", parlist=parlist_indir, modelstr = "alpha")
+
+extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(
+  path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/", 
+  parlist=parlist_indir)
 
 
 ```
@@ -194,7 +197,9 @@ knitr::kable(problems_aang, caption = "Alpha data, alpha model")
 
 ```
 
-No obvious problems with the model/fit.
+A few of the models have rhats that are too large in some runs. The problems occur with data where the transition speed is moderate ($\beta=1$), the prior on $\beta$ is loose or tight, and the anchor is large.
+
+It is a problem that the model can't fit $\alpha_{sigma}=0$
 
 ```{r}
 # pull params from fits
@@ -211,7 +216,8 @@ params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
 
 ```
 
-```{r plotIndirParams}
+$\beta$ and $c$ are always underestimated. $h$ is estimated ok when the true transition speed is rapid, and poorly when it's slower. Effects ($\alpha_g$) are generally centered on 0 and are quite wide like the prior.
+```{r plotIndirParams, cache=TRUE}
 
 
 #map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
@@ -235,16 +241,12 @@ plot_densities_anchorxbeta(params_aang, "alpha_g.9_model", "alpha_g.9_true")
 
 ```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
 
-#recaptured_ba <- which_params_recaptured(params_ba)
 recaptured_aang <- params_aang %>%
   split(.$modelid) %>%
   which_params_recaptured()
 
-
-#prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
 prop_recaptured_aang <- calc_prop_recaptured_overall(recaptured_aang, truepars=parframe_indir)
 
-#prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
 prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parframe_indir)  %>%
   purrr::map_dfr(bind_rows, .id=".id")
 ```
@@ -264,9 +266,9 @@ ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=trans
 
 
 ```
-No model returns more than 30 of 34 parameters in the 90% HPDI. Parameters for data with faster transitions is harder to estimate.
+Models for data with fast transitions capture more true parameters in their 50% HPDIs than data with medium transitions, but medium transitions capture more true parameters in their 90% HPDIs. Medium speed transitions, however, tend to have fitting issues unless the prior on $\beta$ is just right. No model captures all parameters. There isn't a dramatic difference between priors, though a tight $\beta$ prior and small anchor depresses the number of parameters estimated correctly for fast transition datasets.
 
-Which parameters are easier or harder to recapture
+###Which parameters are easier or harder to recapture?
 
 ```{r plotIndirRecapture, fig.height=11}
 
@@ -282,9 +284,9 @@ ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes
 
 ```
 
-As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned. Very occasionally one (but never both of the cut points are returned at medium transition speeds ($\beta = 1$.)
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned well. They are never returned for fast transition datasets and they are only returned in the 90% HPDI for medium transition datasets.)
 
-The transition points and effects $\alpha$ fare better. The true value, `0`, is always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
+The transition points and effects $\alpha$ fare better. The true value, `0`, is almost always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
 
 
 # Can group effects in a range of sizes be detected?
@@ -310,28 +312,62 @@ Since groups have different effects, they should look different in this plot.
 
 Does the model accurately recapture parameters? I'll use the same priors as above, and the same Stan model.
 
+```{r paramsg}
+
+beta_rate <- c(1:3) # rate parameters for exponential prior on beta
+anchor <- c(10, 20) # different anchor parameters for induced dirichlet prior
+
+# make a nice dataframe with all combinations params used to simulate data and model params used to try to recover those params
+# 
+
+parframe_indirg <- simulation_inputg$pars %>% 
+  dplyr::select(transition, beta, c.1, c.2, group, alpha_group) %>%
+  tidyr::pivot_wider(names_from = group, names_prefix = "alpha_g.", values_from = alpha_group) %>% # put in wide format
+  merge(y= beta_rate) %>%
+    rename(beta_rate=y) %>%
+    merge(y=anchor) %>%
+    rename(anchor=y)
+parframe_indirg$modelid <- 1:nrow(parframe_indir) #label the models
+
+# make a wide format with beta_group cols and merge with parframe_indir
+
+
+parlist_indirg <- make_parframe_list(parframe_indirg)
+
+# model parameterizations
+parameterizations_indirg <- select(parframe_indirg, anchor, beta_rate) %>%
+  distinct() %>%
+  arrange(anchor, beta_rate)
+
+table_indirg <- parframe_indirg %>% 
+  select(transition, modelid, anchor, beta_rate) %>%
+  group_by(transition, modelid, anchor, beta_rate) %>%
+  tidyr::pivot_wider(names_from=transition, values_from=modelid) %>%
+  tidyr::unite("modelids", c("fast", "medium"), sep=", ", remove=TRUE) %>%
+  right_join(parameterizations_indirg) %>%
+  select(modelids, anchor, beta_rate)
+
+```
 
 ```{r indirRecaptureg, include=FALSE}
 
-# run all models, parallelized
-
-# make a cluster using half your cores
-cl <- parallel::makeCluster(10)
-
-# export the stuff you need to run on the cluster
-parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alphag"))
-parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
-
-reps=10
-
-for (i in 1:reps) {
-  fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alphag, pars=x)})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/run", i, ".rds"))
-  rm(fits_indir)
-  gc()
-}
-
-parallel::stopCluster(cl) #close the cluster
+# # run all models, parallelized
+# 
+# # make a cluster using half your cores
+# cl <- parallel::makeCluster(10)
+# 
+# # export the stuff you need to run on the cluster
+# parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alphag"))
+# parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
+# 
+# for (i in 1:reps) {
+#   fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alphag, pars=x)})
+#   saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/run", i, ".rds"))
+#   rm(fits_indir)
+#   gc()
+# }
+# 
+# parallel::stopCluster(cl) #close the cluster
 
 ```
 
@@ -341,40 +377,24 @@ parallel::stopCluster(cl) #close the cluster
 
 dirs <- list.dirs("induced_dirichlet/group_runs/")
 
-extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/", parlist=parlist_indir, modelstr = "alpha")
+extracts_indir_alpha_alpha_g <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/", parlist=parlist_indirg)
 
 
 ```
 
-Models with the effect on the slope have serious fitting issues. Lots of divergences. Models with the effect on intercept don't have fitting problems.
 
-```{r indirModelCheck}
+Again, models for data with medium speed transitions struggled - generally rhat too large. Problems don't occur with models for fast transition speed data. When models have an anchor of 10 and relatively constrained $\beta$ priors (rate 2 or 3) or an anchor of 20 and a tight $\beta$ prior (3), models for medium transition speed don't run into convergence, etc. problems.
 
-table_problems <- function(problemlist) {
-  problems <- problemlist$problems %>%
-    map_dfr(bind_rows, .id=".id") %>%
-    rename(run=.id) %>%
-    group_by(modelid) %>%
-    summarize(bad_proportion = n()/reps, bad_count = n(), divergences_mean=mean(divergences), bad_rhats_mean=mean(bad_rhats), bad_neff_mean=mean(bad_neff))
+```{r indirModelCheckg}
+
+
+problems_aag <- table_problems(extracts_indir_alpha_alpha_g)
   
-  return(problems)
-}
 
-# problems_bb <- table_problems(extracts_indir_beta_beta)
-# problems_ba <- table_problems(extracts_indir_beta_alpha)
-# problems_ab <- table_problems(extracts_indir_alpha_beta)
-problems_aang <- table_problems(extracts_indir_alpha_alpha)
-  
-# knitr::kable(problems_bb, caption = "Beta data, beta model")
-# knitr::kable(problems_ab, caption = "Alpha data, beta model")
-# 
-# knitr::kable(problems_ba, caption = "Beta data, alpha model")
-knitr::kable(problems_aang, caption = "Alpha data, alpha model")
-
+knitr::kable(problems_aag, caption = "Alpha data, alpha model")
 
 ```
 
-No obvious problems with the model/fit.
 
 ```{r}
 # pull params from fits
@@ -383,7 +403,7 @@ No obvious problems with the model/fit.
 #   rename(run=.id) %>%
 #   split(.$modelid)
 
-params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
+params_aag <- extracts_indir_alpha_alpha_g$pars %>%
   map_dfr(bind_rows, .id = ".id") %>%
   rename(run=.id) #%>%
   #split(.$modelid)
@@ -391,51 +411,48 @@ params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
 
 ```
 
-```{r plotIndirParams}
+$\beta$ and $c$ are always underestimated, and quite dramatically when underlying transition speed is medium. $h$ is underestimated as well, though not quite as badly.
+```{r plotIndirParamsg}
 
 
 #map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
 #map(params_aang[sort(base::sample(1:12, 5))], parplot)
 
-plot_densities_anchorxbeta(params_aang, "beta_model", "beta_true")
-plot_densities_anchorxbeta(params_aang, "c.1_model", "c.1_true")
-plot_densities_anchorxbeta(params_aang, "c.2_model", "c.2_true")
-plot_densities_anchorxbeta(params_aang, "h.1_group.1_model", "h.1_group.1_true")
-plot_densities_anchorxbeta(params_aang, "h.1_group.5_model", "h.1_group.5_true")
-plot_densities_anchorxbeta(params_aang, "h.1_group.10_model", "h.1_group.10_true")
-plot_densities_anchorxbeta(params_aang, "alpha_g.1_model", "alpha_g.1_true")
-plot_densities_anchorxbeta(params_aang, "alpha_g.2_model", "alpha_g.2_true")
-plot_densities_anchorxbeta(params_aang, "alpha_g.3_model", "alpha_g.3_true")
-plot_densities_anchorxbeta(params_aang, "alpha_g.4_model", "alpha_g.4_true")
-plot_densities_anchorxbeta(params_aang, "alpha_g.9_model", "alpha_g.9_true")
+plot_densities_anchorxbeta(params_aag, "beta_model", "beta_true")
+plot_densities_anchorxbeta(params_aag, "c.1_model", "c.1_true")
+plot_densities_anchorxbeta(params_aag, "c.2_model", "c.2_true")
+plot_densities_anchorxbeta(params_aag, "h.1_group.1_model", "h.1_group.1_true")
+plot_densities_anchorxbeta(params_aag, "h.1_group.5_model", "h.1_group.5_true")
+plot_densities_anchorxbeta(params_aag, "h.1_group.10_model", "h.1_group.10_true")
+plot_densities_anchorxbeta(params_aag, "alpha_g.1_model", "alpha_g.1_true")
+plot_densities_anchorxbeta(params_aag, "alpha_g.2_model", "alpha_g.2_true")
+plot_densities_anchorxbeta(params_aag, "alpha_g.3_model", "alpha_g.3_true")
+plot_densities_anchorxbeta(params_aag, "alpha_g.4_model", "alpha_g.4_true")
+plot_densities_anchorxbeta(params_aag, "alpha_g.9_model", "alpha_g.9_true")
 
 ```
 
-# Recapture rate
+## Recapture rate
 
-```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
+```{r indirHDPIg, message=FALSE, warning=FALSE, cache=TRUE}
 
-#recaptured_ba <- which_params_recaptured(params_ba)
-recaptured_aang <- params_aang %>%
+recaptured_aag <- params_aag %>%
   split(.$modelid) %>%
   which_params_recaptured()
 
+prop_recaptured_aag <- calc_prop_recaptured_overall(recaptured_aag, truepars=parframe_indirg)
 
-#prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
-prop_recaptured_aang <- calc_prop_recaptured_overall(recaptured_aang, truepars=parframe_indir)
-
-#prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
-prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parframe_indir)  %>%
+prop_recaptured_by_param_aag <- calc_recaptured_by_param(recaptured_aag, parframe_indirg)  %>%
   purrr::map_dfr(bind_rows, .id=".id")
 ```
 
 
 
-```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs"}
+```{r plotIndirRecaptureoverallg, caption="Number of parameters recaptured by each model, averaged across model runs"}
 
-ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
+ggplot(prop_recaptured_aag$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
   geom_bar(stat="identity") +
-  geom_bar(prop_recaptured_aang$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
+  geom_bar(prop_recaptured_aag$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
   facet_grid(anchor ~ beta_rate) +
   ylim(c(0,34)) +
   ggtitle("Mean # of parameters captured in 50% and 90% HPDI") +
@@ -444,15 +461,13 @@ ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=trans
 
 
 ```
-No model returns more than 30 of 34 parameters in the 90% HPDI. Parameters for data with faster transitions is harder to estimate.
+Most parameters are not captured in the 50% HPDI. Parameters for medium transition speed data are easier to recapture.
 
-Which parameters are easier or harder to recapture
+```{r plotIndirRecaptureg, fig.height=11}
 
-```{r plotIndirRecapture, fig.height=11}
-
-ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
+ggplot(dplyr::filter(prop_recaptured_by_param_aag, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
   geom_bar(stat="identity", position="dodge") +
-  geom_bar(dplyr::filter(prop_recaptured_by_param_aang, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
+  geom_bar(dplyr::filter(prop_recaptured_by_param_aag, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
   facet_grid(anchor  ~ transition + beta_rate) +
   ylim(c(0,1)) +
   ggtitle("Mean # of parameters captured in 50% and 90% HPDI", subtitle = "facet columns are transition and beta rate, rows are anchors") +
@@ -462,16 +477,11 @@ ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes
 
 ```
 
-As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned. Very occasionally one (but never both of the cut points are returned at medium transition speeds ($\beta = 1$.)
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned ever in the 50% HPDI. For medium transition speed data, they are returned in the 90% HPDI, but never for fast transition speed data.
 
-The transition points and effects $\alpha$ fare better. The true value, `0`, is always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
+The transition points and effects $\alpha$ fare better. The true value for $h$ and $\alpha$ are generally returned in the 90% HPDI but very rarely in the 50%.
 
+# tl;dr
 
+Null groups are recaptured, but probably with too much uncertainty to be useful in my situation. Group effects and transitions are not recaptured very well -$h$ is consistently underestimated. And the actual params $\beta$ and $c$ are not trustworthy.
 
-```{r}
-hist(rnorm(1000), breaks=20)
-```
-
-```{r}
-hist(rnorm(1000), breaks=20)
-```
