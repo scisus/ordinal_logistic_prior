@@ -35,7 +35,7 @@ data {
     int<lower=1, upper=K> y[N]; // Observed ordinals
     vector[N] x;                  // Covariate
 
-    int<lower=1, upper=7> group[N]; //Groups
+    int<lower=1> group[N]; //Groups
 }
 
 parameters {
@@ -46,9 +46,9 @@ parameters {
 
 }
 
-transformed parameters {
-    real sigma_group = 1; // be real explicit about the prior
-}
+// transformed parameters {
+//     real sigma_group = 1; // be real explicit about the prior
+// }
 
 model {
     vector[N] phi;
@@ -57,7 +57,7 @@ model {
     // Prior model
     beta ~ exponential(3);
     c ~ induced_dirichlet(rep_vector(1, K), 0);
-    alpha_g ~ normal(0, sigma_group);
+    alpha_g ~ normal(0, 1);
 
 
     // Observational model
