@@ -498,10 +498,11 @@ knitr::kable(problems_indir, caption = "Models with divergences, rhats > 1, or n
 
 ```
 
-`r nrow(problems_indir)` out of 27 models had problems with Rhat or neff_ratio in 1-6 of the model runs. Only model 4 had neff_ratio problems. Again, no divergences.
+`r nrow(problems_indir)` out of 27 models had problems with Rhat or neff_ratios. Only model 4 had neff_ratio problems. Again, no divergences.
 
 ```{r indirPrettyModels}
-noproblem_models_indir <- dplyr::filter(parframe_indir, !modelid %in% problems_indir$modelid)
+noproblem_models_indir <- dplyr::filter(parframe_indir, !modelid %in% problems_indir$modelid) %>%
+  arrange(desc(transition), anchor, beta_rate)
 knitr::kable(noproblem_models_indir, caption="model parameterization-dataset combinations that never had an (very obvious) problem")
 ```
 
@@ -615,7 +616,7 @@ This model seems fussy and I'm concerned about how it's going to behave when I i
 
 ## tl;dr
 
-Ordinal logistic models with gamma priors have fit issues and ordinal logistic models with dirichlet priors can't recapture the parameters. If fit/stan diagnostic issues can be dealt with enough for the gamma prior, it may be workable. But things will likely explode when adding groups.
+Ordinal logistic models with gamma priors have throw up all kinds of issues with the diagnostics and ordinal logistic models with dirichlet priors can't recapture the parameters (and have some rhat issues). If fit/stan diagnostic issues can be dealt with enough for the gamma prior, it may be workable. But things will likely explode when adding groups.
 
 
 
