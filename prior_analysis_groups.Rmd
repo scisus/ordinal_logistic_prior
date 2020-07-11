@@ -115,9 +115,29 @@ parframe_indir$modelid <- 1:nrow(parframe_indir) #label the models
 
 
 parlist_indir <- make_parframe_list(parframe_indir)
+
+# model parameterizations
+parameterizations_indir <- select(parframe_indir, anchor, beta_rate) %>%
+  distinct() %>%
+  arrange(anchor, beta_rate)
+
+table_indir <- parframe_indir %>% 
+  select(transition, modelid, anchor, beta_rate) %>%
+  group_by(transition, modelid, anchor, beta_rate) %>%
+  tidyr::pivot_wider(names_from=transition, values_from=modelid) %>%
+  tidyr::unite("modelids", c("fast", "medium"), sep=", ", remove=TRUE) %>%
+  right_join(parameterizations_indir) %>%
+  select(modelids, anchor, beta_rate)
+
 ```
 
+```{r paramsTableIndir}
+knitr::kable(table_indir, caption="Prior parameters. modelids are unique identifiers for each combination of prior parameters and simulated datasets, in order from fast transition to medium transition dataset")
+```
+I'm going to do `r reps` runs of each of the 12 models in Stan.
+
 ```{r indirRecapture, include=FALSE}
+
 
 # run all models, parallelized
 
@@ -126,34 +146,12 @@ no_cores <- parallel::detectCores()/2
 cl <- parallel::makeCluster(no_cores)
 
 # export the stuff you need to run on the cluster
-parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_beta", "simdat_alpha"))
+parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alpha"))
 parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
 
-reps=10
 for (i in 1:reps) {
-  fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_beta, pars=x, modification="beta")})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/beta_dat_beta_mod/run", i, ".rds"))
-  rm(fits_indir)
-  gc()
-}
-
-for (i in 1:reps) {
-    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_beta, pars=x, modification="alpha")})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/beta_dat_alpha_mod/run", i, ".rds"))
-  rm(fits_indir)
-  gc()
-}
-
-for (i in 1:reps) {  
-    fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x, modification="beta")})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_beta_mod/run", i, ".rds"))
-  rm(fits_indir)
-  gc()
-}
-
-for (i in 1:reps) {  
     fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alpha, pars=x, modification="alpha")})
-  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod/run", i, ".rds"))
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/run", i, ".rds"))
   rm(fits_indir)
   gc()
 }
@@ -162,6 +160,15 @@ parallel::stopCluster(cl) #close the cluster
 
 ```
 
+The Stan program fitting these models is
+
+```{r}
+writeLines(readLines("induced_dirichlet/dirichlet_covar_alpha_group.stan"))
+```
+
+
+Models have very serious problems (divergences, large rhats, low effective sample sizes, etc.) if the variance on group effects has a default (uniform) or $\mathrm{Exponential}(1)$ distribution. 
+
 ```{r readIndirModels, warning=FALSE, cache=TRUE}
 
 # pull in parameters and info on divergences, etc from saved stanfit objects
@@ -169,22 +176,172 @@ parallel::stopCluster(cl) #close the cluster
 # 
 
 
+dirs <- list.dirs("induced_dirichlet/group_runs/")
+extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_nullgroup/", parlist=parlist_indir, modelstr = "alpha")
+
+
+```
+
+
+```{r indirModelCheck}
+
+
+
+problems_aang <- table_problems(extracts_indir_alpha_alpha_ng)
   
+knitr::kable(problems_aang, caption = "Alpha data, alpha model")
 
 
+```
 
 No obvious problems with the model/fit.
 
+```{r}
+# pull params from fits
+# params_ba <- extracts_indir_beta_alpha$pars %>%
+#   map_dfr(bind_rows, .id = ".id") %>%
+#   rename(run=.id) %>%
+#   split(.$modelid)
+
+params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
+  map_dfr(bind_rows, .id = ".id") %>%
+  rename(run=.id) #%>%
+  #split(.$modelid)
+
+
+```
+
+```{r plotIndirParams}
+
+
+#map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
+#map(params_aang[sort(base::sample(1:12, 5))], parplot)
+
+plot_densities_anchorxbeta(params_aang, "beta_model", "beta_true")
+plot_densities_anchorxbeta(params_aang, "c.1_model", "c.1_true")
+plot_densities_anchorxbeta(params_aang, "c.2_model", "c.2_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.1_model", "h.1_group.1_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.5_model", "h.1_group.5_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.10_model", "h.1_group.10_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.1_model", "alpha_g.1_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.2_model", "alpha_g.2_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.3_model", "alpha_g.3_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.4_model", "alpha_g.4_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.9_model", "alpha_g.9_true")
+
+```
+
+## Recapture rate
+
+```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
+
+#recaptured_ba <- which_params_recaptured(params_ba)
+recaptured_aang <- params_aang %>%
+  split(.$modelid) %>%
+  which_params_recaptured()
+
+
+#prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
+prop_recaptured_aang <- calc_prop_recaptured_overall(recaptured_aang, truepars=parframe_indir)
+
+#prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
+prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parframe_indir)  %>%
+  purrr::map_dfr(bind_rows, .id=".id")
+```
 
 
 
+```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs"}
+
+ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
+  geom_bar(stat="identity") +
+  geom_bar(prop_recaptured_aang$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
+  facet_grid(anchor ~ beta_rate) +
+  ylim(c(0,34)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI") +
+  geom_hline(yintercept=34)
+
+
+
+```
+No model returns more than 30 of 34 parameters in the 90% HPDI. Parameters for data with faster transitions is harder to estimate.
+
+Which parameters are easier or harder to recapture
+
+```{r plotIndirRecapture, fig.height=11}
+
+ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_bar(dplyr::filter(prop_recaptured_by_param_aang, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
+  facet_grid(anchor  ~ transition + beta_rate) +
+  ylim(c(0,1)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI", subtitle = "facet columns are transition and beta rate, rows are anchors") +
+  theme(legend.position = "top") +
+  coord_flip()
+
+
+```
+
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned. Very occasionally one (but never both of the cut points are returned at medium transition speeds ($\beta = 1$.)
+
+The transition points and effects $\alpha$ fare better. The true value, `0`, is always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
+
+
+# Can group effects in a range of sizes be detected?
+
+While I am hoping group effects will largely be 0 or very close to it, I need to know if they are not. So, now that we know the model can detect null effects, I need to know what size effects it can detect. To that end, I will simulate data from an ordinal logistic model as above, but this time with effects on the intercept $\alpha$ distributed $\mathcal{N}(0,1)$
+
+```{r GroupSimulation, fig.height=10, fig.width=5, fig.cap="Simulated data in each group."}
+
+
+# h_mod <- rnorm(n=G) # how much being in each group modifies half transitions
+h_mod <- c(  -0.99,  0.27,  0.57,  0.01,  0.67,  1.63, -2.05,  0.46, -0.03,  0.28)
+
+simulation_inputg <- set_simulation_parameters(G=G, hmod=h_mod, noeffect = FALSE)
+
+simdat_alphag <- map(simulation_inputg$inputlist, simulate_data)
+
+plot_simulated_data(simdat_alphag, simulation_inputg$inputlist)
+```
+
+Since groups have different effects, they should look different in this plot.
+
+## Estimate parameters
+
+Does the model accurately recapture parameters? I'll use the same priors as above, and the same Stan model.
+
+
+```{r indirRecaptureg, include=FALSE}
+
+# run all models, parallelized
+
+# make a cluster using half your cores
+cl <- parallel::makeCluster(10)
+
+# export the stuff you need to run on the cluster
+parallel::clusterExport(cl, c("fit_indir_model", "parlist_indir", "simdat_alphag"))
+parallel::clusterEvalQ(cl, c(library(rstan), library(StanHeaders)))
+
+reps=10
+
+for (i in 1:reps) {
+  fits_indir <- parallel::parLapply(cl, parlist_indir, function(x) {fit_indir_model(simdatlist = simdat_alphag, pars=x)})
+  saveRDS(fits_indir, file = paste0("induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/run", i, ".rds"))
+  rm(fits_indir)
+  gc()
 }
 
+parallel::stopCluster(cl) #close the cluster
+
+```
+
+```{r readIndirModelsg, warning=FALSE, cache=TRUE}
+
+# pull in parameters and info on divergences, etc from saved stanfit objects
+
 dirs <- list.dirs("induced_dirichlet/group_runs/")
-extracts_indir_beta_beta <- extract_pars_and_problems(path="induced_dirichlet/group_runs/beta_dat_beta_mod/", parlist=parlist_indir, modelstr = "beta")
-extracts_indir_beta_alpha <- extract_pars_and_problems(path="induced_dirichlet/group_runs/beta_dat_alpha_mod/", parlist=parlist_indir, modelstr = "alpha")
-extracts_indir_alpha_beta <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_beta_mod/", parlist=parlist_indir, modelstr = "beta")
-extracts_indir_alpha_alpha <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod/", parlist=parlist_indir, modelstr = "alpha")
+
+extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(path="induced_dirichlet/group_runs/alpha_dat_alpha_mod_group/", parlist=parlist_indir, modelstr = "alpha")
 
 
 ```
@@ -203,44 +360,54 @@ table_problems <- function(problemlist) {
   return(problems)
 }
 
-problems_bb <- table_problems(extracts_indir_beta_beta)
-problems_ba <- table_problems(extracts_indir_beta_alpha)
-problems_ab <- table_problems(extracts_indir_alpha_beta)
-problems_aa <- table_problems(extracts_indir_alpha_alpha)
+# problems_bb <- table_problems(extracts_indir_beta_beta)
+# problems_ba <- table_problems(extracts_indir_beta_alpha)
+# problems_ab <- table_problems(extracts_indir_alpha_beta)
+problems_aang <- table_problems(extracts_indir_alpha_alpha)
   
-knitr::kable(problems_bb, caption = "Beta data, beta model")
-knitr::kable(problems_ab, caption = "Alpha data, beta model")
-
-knitr::kable(problems_ba, caption = "Beta data, alpha model")
-knitr::kable(problems_aa, caption = "Alpha data, alpha model")
+# knitr::kable(problems_bb, caption = "Beta data, beta model")
+# knitr::kable(problems_ab, caption = "Alpha data, beta model")
+# 
+# knitr::kable(problems_ba, caption = "Beta data, alpha model")
+knitr::kable(problems_aang, caption = "Alpha data, alpha model")
 
 
 ```
 
-Fit on intercept models was fine no matter how data was simulated. Going forward, I'll only be using the intercept models. 
+No obvious problems with the model/fit.
 
 ```{r}
 # pull params from fits
-params_ba <- extracts_indir_beta_alpha$pars %>%
-  map_dfr(bind_rows, .id = ".id") %>%
-  rename(run=.id) %>%
-  split(.$modelid)
+# params_ba <- extracts_indir_beta_alpha$pars %>%
+#   map_dfr(bind_rows, .id = ".id") %>%
+#   rename(run=.id) %>%
+#   split(.$modelid)
 
-params_aa <- extracts_indir_alpha_alpha$pars %>%
+params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
   map_dfr(bind_rows, .id = ".id") %>%
-  rename(run=.id) %>%
-  split(.$modelid)
+  rename(run=.id) #%>%
+  #split(.$modelid)
 
 
 ```
 
 ```{r plotIndirParams}
-```{r plotIndirParams, fig.height=3, fig.width=4}
 
 
+#map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
+#map(params_aang[sort(base::sample(1:12, 5))], parplot)
 
-map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
-map(params_aa[sort(base::sample(1:12, 5))], parplot)
+plot_densities_anchorxbeta(params_aang, "beta_model", "beta_true")
+plot_densities_anchorxbeta(params_aang, "c.1_model", "c.1_true")
+plot_densities_anchorxbeta(params_aang, "c.2_model", "c.2_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.1_model", "h.1_group.1_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.5_model", "h.1_group.5_true")
+plot_densities_anchorxbeta(params_aang, "h.1_group.10_model", "h.1_group.10_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.1_model", "alpha_g.1_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.2_model", "alpha_g.2_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.3_model", "alpha_g.3_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.4_model", "alpha_g.4_true")
+plot_densities_anchorxbeta(params_aang, "alpha_g.9_model", "alpha_g.9_true")
 
 ```
 
@@ -254,6 +421,8 @@ recaptured_aang <- params_aang %>%
   which_params_recaptured()
 
 
+#prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
+prop_recaptured_aang <- calc_prop_recaptured_overall(recaptured_aang, truepars=parframe_indir)
 
 #prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
 prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parframe_indir)  %>%
@@ -262,98 +431,47 @@ prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parfr
 
 
 
+```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs"}
+
+ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=transition)) +
+  geom_bar(stat="identity") +
+  geom_bar(prop_recaptured_aang$ninety, stat="identity", alpha=0.5, mapping = aes(x=transition, y=mean_captured, fill=transition), inherit.aes = FALSE) +
+  facet_grid(anchor ~ beta_rate) +
+  ylim(c(0,34)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI") +
+  geom_hline(yintercept=34)
 
 
-recaptured_ba <- which_params_recaptured(params_ba)
-recaptured_aa <- which_params_recaptured(params_aa)
 
-calc_prop_recaptured_overall <- function(inint, truepars) {
-
-
-prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
-prop_recaptured_aa <- calc_prop_recaptured_overall(recaptured_aa, truepars=parframe_indir)
-
-calc_recaptured_by_param <- function(inint, truepars) {
-    perform50_summary <- inint$fifty %>%
-      filter(param != "sigma_group") %>%
-        group_by(modelid, param) %>%
-        summarise(prop_inint = mean(inint)) %>%
-        left_join(truepars)
-
-    perform90_summary <- inint$ninety %>%
-      filter(param != "sigma_group") %>%
-        group_by(modelid, param) %>%
-        summarise(prop_inint = mean(inint)) %>%
-        left_join(truepars)
-
-    return(list(fifty=perform50_summary, ninety=perform90_summary))
-}
-
-prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
-prop_recaptured_by_param_aa <- calc_recaptured_by_param(recaptured_aa, parframe_indir) 
 ```
+No model returns more than 30 of 34 parameters in the 90% HPDI. Parameters for data with faster transitions is harder to estimate.
 
+Which parameters are easier or harder to recapture
 
+```{r plotIndirRecapture, fig.height=11}
 
-
-```{r plotIndirRecaptureoverall, caption="Number of parameters recaptured by each model, averaged across model runs", fig.width=7, fig.height=4}
-ggplot(prop_recaptured_ba$fifty, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c() +
-  ylab("beta_rate")
-# ggplot(prop_recaptured_aa$fifty, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-#   geom_tile(colour="white") +
-#   geom_text(aes(label=modelid)) +
-#   facet_wrap("transition", scales="free") +
-#   ggtitle("Proportion of parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-#   scale_fill_viridis_c(limits=c(0,10)) +
-#   ylab("beta_rate")
-
-ggplot(prop_recaptured_ba$ninety, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-  geom_tile(colour="white") +
-  geom_text(aes(label=modelid)) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-  scale_fill_viridis_c(limits=c(0,17)) +
-  ylab("beta_rate")
-
-# ggplot(prop_recaptured_aa$ninety, aes(x=as.factor(anchor), y=as.factor(beta_rate), fill=mean_captured)) + 
-#   geom_tile(colour="white") +
-#   geom_text(aes(label=modelid)) +
-#   facet_wrap("transition", scales="free") +
-#   ggtitle("Proportion of parameters recaptured in 90% HPDI",subtitle = "faceted by transition speed in simulated dataset \n labeled with modelid") +
-#   scale_fill_viridis_c(limits=c(0,10)) +
-#   ylab("beta_rate")
-```
-Model is better able to return parameters when data generating process in on intercept.
-
-But what about the relationship between the variables - the transition points?
-
-```{r plotIndirRecapture}
-
-ggplot(prop_recaptured_by_param_ba$fifty, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 50% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset \n with anchor and beta rate labels") +
+ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_bar(dplyr::filter(prop_recaptured_by_param_aang, .id=="ninety"), stat="identity", position="dodge", alpha=0.5, mapping = aes(x=param, y=prop_inint, fill=transition), inherit.aes = FALSE) +
+  facet_grid(anchor  ~ transition + beta_rate) +
+  ylim(c(0,1)) +
+  ggtitle("Mean # of parameters captured in 50% and 90% HPDI", subtitle = "facet columns are transition and beta rate, rows are anchors") +
   theme(legend.position = "top") +
-  ylab("model id")  +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  coord_flip()
 
-ggplot(prop_recaptured_by_param_ba$ninety, aes(x=param, y=as.factor(modelid), fill=prop_inint)) + 
-  geom_tile(color="white") +
-  scale_fill_viridis_c()  +
-  geom_text(aes(label=paste(anchor, beta_rate, sep="\n")), size=2.5) +
-  facet_wrap("transition", scales="free") +
-  ggtitle("Parameters recaptured in 90% HPDI", subtitle = "faceted by transition speed (beta) in simulated dataset\n with anchor and beta rate labels") +
-  theme(legend.position = "top") +
-  ylab("model id") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 ```
 
-Only very small deviations from h (or alpha) are recaptured.
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned. Very occasionally one (but never both of the cut points are returned at medium transition speeds ($\beta = 1$.)
+
+The transition points and effects $\alpha$ fare better. The true value, `0`, is always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
+
+
+
+```{r}
+hist(rnorm(1000), breaks=20)
+```
+
+```{r}
+hist(rnorm(1000), breaks=20)
+```
