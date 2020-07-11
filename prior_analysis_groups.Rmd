@@ -54,15 +54,16 @@ In [the case without groups](https://scisus.github.io/ordinal_logistic_prior/pri
 In the previous analysis, no groups were considered. In reality, I want to know if things like site, provenance, and clone affect $h$.
 
 ## Goals
-1 - Generate data with an ordinal logistic model 
-   - With linear model structure $\beta x + \alpha$
-2 - Fit model with Stan
-3 - Determine whether $\beta$, $\beta_{site_i}$, \alpha$, $c$, or $h$ can be returned.
+1. Generate data with an ordinal logistic model with linear model structure $\beta x + \alpha$
+2. Fit model with Stan
+3. Determine whether $\beta$, $\beta_{site_i}$, $\alpha$, $c$, or $h$ can be returned.
 
 
-I'll simulate data for 10 groups with `N=100` observations for each group. Each group's $h$ are shifted by $h_mod$, which is drawn from a $\mathcal{N}(0,\sigma)$. Data is simulated for two transition speeds, $\beta=1$ and $\beta=2$.
+I'll simulate data for 10 groups with `N=100` observations for each group. Each group's $h$ are shifted by $h_{mod}$, which is drawn from a $\mathcal{N}(0,\sigma)$. Data is simulated for two transition speeds, $\beta=1$ and $\beta=2$.
 
 First we'll do this with null effects ($\sigma=0$), then with a relatively large range of effects (\sigma = 1).
+
+Each model will be run `r reps` times to see if the results are stable.
 
 # Can null group effects be detected?
 
@@ -134,6 +135,7 @@ table_indir <- parframe_indir %>%
 ```{r paramsTableIndir}
 knitr::kable(table_indir, caption="Prior parameters. modelids are unique identifiers for each combination of prior parameters and simulated datasets, in order from fast transition to medium transition dataset")
 ```
+
 I'm going to do `r reps` runs of each of the 12 models in Stan.
 
 ```{r indirRecapture, include=FALSE}
@@ -167,7 +169,11 @@ writeLines(readLines("induced_dirichlet/dirichlet_covar_alpha_group.stan"))
 ```
 
 
-Models have very serious problems (divergences, large rhats, low effective sample sizes, etc.) if the variance on group effects has a default (uniform) or $\mathrm{Exponential}(1)$ distribution. 
+Models have very serious problems (divergences, large rhats, low effective sample sizes, etc.) if the variance on group effects has a default (uniform) or $\mathrm{Exponential}(1)$ distribution (not shown).
+
+Performance is better when prior on $\alpha$ is an explicit $\mathcal{N}(0,1)$.
+
+Ideally I'd want to fit $\sigma$ since I actually don't know it in advance. It's a problem that the model can't fit it.
 
 ```{r readIndirModels, warning=FALSE, cache=TRUE}
 
@@ -192,14 +198,14 @@ extracts_indir_alpha_alpha_ng <- extract_pars_and_problems(
 
 problems_aang <- table_problems(extracts_indir_alpha_alpha_ng)
   
-knitr::kable(problems_aang, caption = "Alpha data, alpha model")
+knitr::kable(problems_aang, caption = "Models with obvious problems.")
 
 
 ```
 
 A few of the models have rhats that are too large in some runs. The problems occur with data where the transition speed is moderate ($\beta=1$), the prior on $\beta$ is loose or tight, and the anchor is large.
 
-It is a problem that the model can't fit $\alpha_{sigma}=0$
+
 
 ```{r}
 # pull params from fits
@@ -217,7 +223,8 @@ params_aang <- extracts_indir_alpha_alpha_ng$pars %>%
 ```
 
 $\beta$ and $c$ are always underestimated. $h$ is estimated ok when the true transition speed is rapid, and poorly when it's slower. Effects ($\alpha_g$) are generally centered on 0 and are quite wide like the prior.
-```{r plotIndirParams, cache=TRUE}
+
+```{r plotIndirParams, cache=TRUE, fig.cap= "Parameter estimates with true values as vertical lines"}
 
 
 #map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
@@ -266,11 +273,16 @@ ggplot(prop_recaptured_aang$fifty, aes(x=transition, y=mean_captured, fill=trans
 
 
 ```
+
 Models for data with fast transitions capture more true parameters in their 50% HPDIs than data with medium transitions, but medium transitions capture more true parameters in their 90% HPDIs. Medium speed transitions, however, tend to have fitting issues unless the prior on $\beta$ is just right. No model captures all parameters. There isn't a dramatic difference between priors, though a tight $\beta$ prior and small anchor depresses the number of parameters estimated correctly for fast transition datasets.
 
-###Which parameters are easier or harder to recapture?
+### Which parameters are easier or harder to recapture?
 
-```{r plotIndirRecapture, fig.height=11}
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned well. They are never returned for fast transition datasets and they are only returned in the 90% HPDI for medium transition datasets.)
+
+The transition points and effects $\alpha$ fare better. The true value, `0`, is almost always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
+
+```{r plotIndirRecapture, fig.height=11, fig.width=7, fig.cap="Proportion of models where parameter returned in 50% (light) or 90% (dark) HPDI. Columns are transition speed and prior on beta, rows are anchors for cutpoint prior."}
 
 ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes(x=param, y=prop_inint, fill=transition)) +
   geom_bar(stat="identity", position="dodge") +
@@ -284,9 +296,7 @@ ggplot(dplyr::filter(prop_recaptured_by_param_aang, .id=="fifty"), mapping = aes
 
 ```
 
-As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned well. They are never returned for fast transition datasets and they are only returned in the 90% HPDI for medium transition datasets.)
 
-The transition points and effects $\alpha$ fare better. The true value, `0`, is almost always in the 90% HPDI and, for many groups, is in the 50% HPDI. But the 90% HPDI is relatively large - there's a fair amount of uncertainty there.
 
 
 # Can group effects in a range of sizes be detected?
@@ -411,7 +421,8 @@ params_aag <- extracts_indir_alpha_alpha_g$pars %>%
 
 ```
 
-$\beta$ and $c$ are always underestimated, and quite dramatically when underlying transition speed is medium. $h$ is underestimated as well, though not quite as badly.
+$\beta$ and $c$ are always underestimated, and quite dramatically when underlying transition speed is fast. $h$ is underestimated as well, though not quite as badly. When the true $\alpha$ is near `0`, it is estimated worse.
+
 ```{r plotIndirParamsg}
 
 
@@ -434,6 +445,8 @@ plot_densities_anchorxbeta(params_aag, "alpha_g.9_model", "alpha_g.9_true")
 
 ## Recapture rate
 
+Most parameters are not captured in the 50% HPDI. Parameters for medium transition speed data are easier to recapture.
+
 ```{r indirHDPIg, message=FALSE, warning=FALSE, cache=TRUE}
 
 recaptured_aag <- params_aag %>%
@@ -446,7 +459,9 @@ prop_recaptured_by_param_aag <- calc_recaptured_by_param(recaptured_aag, parfram
   purrr::map_dfr(bind_rows, .id=".id")
 ```
 
+As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned ever in the 50% HPDI. For medium transition speed data, they are returned in the 90% HPDI, but never for fast transition speed data.
 
+The transition points and effects $\alpha$ fare better. The true value for $h$ and $\alpha$ are generally returned in the 90% HPDI but very rarely in the 50%.
 
 ```{r plotIndirRecaptureoverallg, caption="Number of parameters recaptured by each model, averaged across model runs"}
 
@@ -461,7 +476,7 @@ ggplot(prop_recaptured_aag$fifty, aes(x=transition, y=mean_captured, fill=transi
 
 
 ```
-Most parameters are not captured in the 50% HPDI. Parameters for medium transition speed data are easier to recapture.
+
 
 ```{r plotIndirRecaptureg, fig.height=11}
 
@@ -477,11 +492,9 @@ ggplot(dplyr::filter(prop_recaptured_by_param_aag, .id=="fifty"), mapping = aes(
 
 ```
 
-As one might have expected from the results in a model with less structure in the data, $\beta$ and $c$ aren't returned ever in the 50% HPDI. For medium transition speed data, they are returned in the 90% HPDI, but never for fast transition speed data.
 
-The transition points and effects $\alpha$ fare better. The true value for $h$ and $\alpha$ are generally returned in the 90% HPDI but very rarely in the 50%.
 
 # tl;dr
 
-Null groups are recaptured, but probably with too much uncertainty to be useful in my situation. Group effects and transitions are not recaptured very well -$h$ is consistently underestimated. And the actual params $\beta$ and $c$ are not trustworthy.
+Null groups are recaptured when all effects are null, but probably with too much uncertainty to be useful in my situation. Null groups are not recaptured when other groups are not `0`. Group effects and transitions are not recaptured very well -$h$ is consistently underestimated. And the actual params $\beta$ and $c$ are not trustworthy. 
 
