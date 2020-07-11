@@ -184,7 +184,7 @@ check_model <- function(stanobj) {
     divergences <- dplyr::filter(nuts, Parameter=="divergent__" & Value==1) %>%
         nrow()
     rhats <- rhat(stanobj)
-    bad_rhats <- sum(rhats > 1.01)
+    bad_rhats <- sum(rhats > 1.01 | is.na(rhats))
     nefrats <- neff_ratio(stanobj)
     bad_neff <- sum(nefrats < 0.1, is.nan(nefrats), na.rm=TRUE)
     diagnostics <- data.frame(divergences = divergences, bad_rhats=bad_rhats, bad_neff=bad_neff)
