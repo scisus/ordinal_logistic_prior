@@ -113,38 +113,11 @@ parframe_indir$modelid <- 1:nrow(parframe_indir) #label the models
 
 # make a wide format with beta_group cols and merge with parframe_indir
 
-# format parframe so it works with parLapply better
-make_parframe_list <- function(parframe) {
-    parlist <- split(parframe, seq(nrow(parframe)))
-    names(parlist) <- parframe$modelid
 
-    return(parlist)
-}
 parlist_indir <- make_parframe_list(parframe_indir)
 ```
 
 ```{r indirRecapture, include=FALSE}
-# fit a model with an induced dirichlet prior on cutpoints in stan. simdatlist is a list of simulated data (1 simulated dataset per list entry), pars is a list of parameter values (1 set of parameter values per list entry) and groups is TRUE or FALSE indicating whether you're trying to fit groups.
-fit_indir_model <- function(simdatlist, pars, modification) {
-    #choose whether to use data simulated with a rapid or slow transition
-    if (pars$transition == "medium") {
-        simdat <- simdatlist$medium
-    }
-    if (pars$transition == "fast") {
-        simdat <- simdatlist$fast
-    }
-    #extract parameters for prior distributions
-    simdat$anchor <- pars$anchor
-    simdat$beta_rate <- pars$beta_rate
-
-    #fit the model
-    if (modification == "beta") {
-        fitindir <- stan(file='induced_dirichlet/dirichlet_covar_beta_group.stan', data=simdat, chains=4)
-    } else {
-        fitindir <- stan(file='induced_dirichlet/dirichlet_covar_alpha_group.stan', data=simdat, chains=4)
-    }
-    return(fitindir)
-}
 
 # run all models, parallelized
 
@@ -194,142 +167,17 @@ parallel::stopCluster(cl) #close the cluster
 # pull in parameters and info on divergences, etc from saved stanfit objects
 # very slow step. consider parallelizing to the extent your ram can handle
 # 
-## append a label (string) to all columnnames in a dataframe (x)
-label_names <- function(x, label) {
-    colnames(x) <- paste0(colnames(x), "_", label)
-    return(x)
-}
-
-# make_long_param <- function(params) {
-#   params <- params %>%
-#     pivot_longer(starts_with("alpha"), names_to = "group", values_to = "alpha_group") %>%
-#       extract(group, regex="([:digit:])", into = "group")
-#   return(params)
-# }
 
 
-
-calc_h <- function(pars, type) {
-  if (type == "beta") {
-    newpars <- pars %>%
-      mutate(h.1_group.1 = c.1/(beta + beta_g.1),
-             h.1_group.2 = c.1/(beta + beta_g.2),
-             h.1_group.3 = c.1/(beta + beta_g.3),
-             h.1_group.4 = c.1/(beta + beta_g.4),
-             h.1_group.5 = c.1/(beta + beta_g.5),
-             h.1_group.6 = c.1/(beta + beta_g.6),
-             h.1_group.7 = c.1/(beta + beta_g.7),
-             
-             h.2_group.1 = c.2/(beta + beta_g.1),
-             h.2_group.2 = c.2/(beta + beta_g.2),
-             h.2_group.3 = c.2/(beta + beta_g.3),
-             h.2_group.4 = c.2/(beta + beta_g.4),
-             h.2_group.5 = c.2/(beta + beta_g.5),
-             h.2_group.6 = c.2/(beta + beta_g.6),
-             h.2_group.7 = c.2/(beta + beta_g.7)
-      )
-  }
   
-  if (type == "alpha") {
-    newpars <- pars %>%
-      mutate(h.1_group.1 = (c.1 + alpha_g.1)/beta,
-             h.1_group.2 = (c.1 + alpha_g.2)/beta,
-             h.1_group.3 = (c.1 + alpha_g.3)/beta,
-             h.1_group.4 = (c.1 + alpha_g.4)/beta,
-             h.1_group.5 = (c.1 + alpha_g.5)/beta,
-             h.1_group.6 = (c.1 + alpha_g.6)/beta,
-             h.1_group.7 = (c.1 + alpha_g.7)/beta,
-             
-             h.2_group.1 = (c.2 + alpha_g.1)/beta,
-             h.2_group.2 = (c.2 + alpha_g.2)/beta,
-             h.2_group.3 = (c.2 + alpha_g.3)/beta,
-             h.2_group.4 = (c.2 + alpha_g.4)/beta,
-             h.2_group.5 = (c.2 + alpha_g.5)/beta,
-             h.2_group.6 = (c.2 + alpha_g.6)/beta,
-             h.2_group.7 = (c.2 + alpha_g.7)/beta)
-  }
-  return(newpars)
-}
 
-# calc_true_h <- function(truepars) {
-#   newtruepars <- truepars %>%
-#     mutate(h.1_group.1 = (c.1 + alpha_g.1)/beta,
-#            h.1_group.2 = (c.1 + alpha_g.2)/beta,
-#            h.1_group.3 = (c.1 + alpha_g.3)/beta,
-#            h.1_group.4 = (c.1 + alpha_g.4)/beta,
-#            h.1_group.5 = (c.1 + alpha_g.5)/beta,
-#            h.1_group.6 = (c.1 + alpha_g.6)/beta,
-#            h.1_group.7 = (c.1 + alpha_g.7)/beta,
-#            
-#            h.2_group.1 = (c.2 + alpha_g.1)/beta,
-#            h.2_group.2 = (c.2 + alpha_g.2)/beta,
-#            h.2_group.3 = (c.2 + alpha_g.3)/beta,
-#            h.2_group.4 = (c.2 + alpha_g.4)/beta,
-#            h.2_group.5 = (c.2 + alpha_g.5)/beta,
-#            h.2_group.6 = (c.2 + alpha_g.6)/beta,
-#            h.2_group.7 = (c.2 + alpha_g.7)/beta)
-#   return(newtruepars)
-# }
 
-#bind true parameters (in list parlist) and model parameters (in list fit) even tho it will make a giant df. modelstr is string "alpha" or "beta" and describes whether model structure adds effects to intercept or slope.
-bind_true_model_pars <- function(fits, parlist, modelstr) {
-    # extract params from model object
-    params <- lapply(fits, function(x) {data.frame(rstan::extract(x) ) } )
-   
-    # calculate transitions
-    params <- map(params, calc_h, type=modelstr)
-    parlist <- map(parlist, calc_h, type=modelstr)
 
-    # label params as coming from the model or as true params used to
-    params <- map(params, label_names, label="model")
-    parlist <- map(parlist, label_names, label="true")
+No obvious problems with the model/fit.
 
-    # combine model and true params in a big list of dataframes - each list entry is a dataframe for a single model
-    params <- map2(params, parlist, cbind)
 
-    return(params)
-}
 
-# take a stan object and find out if there's anything egregiously wrong with it
-check_model <- function(stanobj) {
-    nuts <- nuts_params(stanobj)
-    divergences <- dplyr::filter(nuts, Parameter=="divergent__" & Value==1) %>%
-        nrow()
-    rhats <- rhat(stanobj)
-    bad_rhats <- sum(rhats > 1.01)
-    nefrats <- neff_ratio(stanobj)
-    bad_neff <- sum(nefrats < 0.1, is.nan(nefrats), na.rm=TRUE)
-    diagnostics <- data.frame(divergences = divergences, bad_rhats=bad_rhats, bad_neff=bad_neff)
-    return(diagnostics)
-}
 
-# run check_model on a list of models and add a column that names each row by the list name
-check_list_of_models <- function(model_list) {
-    map_dfr(model_list, check_model, .id=".id") %>%
-        rename(modelid=.id)
-}
-
-# Extract model configurations and the most obvious problems with fit/convergence from stanfit objects. Stanfit objects are in lists in .rds files saved in path. path is a string denoting the directory where the rds files are stored. Nothing other than .rds files with lists of stanfit objects should be stored in path.
-extract_pars_and_problems <- function(path, parlist, modelstr = modelstr) {
-    fits <- list.files(path=path)
-    reps <- length(fits)
-    pars <- list()
-    bad_models <- list()
-
-    for (i in 1:reps) {
-        run <- readRDS(paste0(path, fits[i])) # read in first run
-        run_pars <- bind_true_model_pars(run, parlist=parlist, modelstr = modelstr) # extract parameters
-        run_fit <- check_list_of_models(run) %>% # id problems
-            mutate(all_bads = divergences + bad_rhats + bad_neff) %>%
-            filter(all_bads > 0) %>%
-            select(-all_bads)
-        pars[[i]] <- run_pars
-        bad_models[[i]] <- run_fit
-        rm(run, run_pars, run_fit)
-        gc()
-    }
-
-    return(list(pars = pars, problems = bad_models))
 }
 
 dirs <- list.dirs("induced_dirichlet/group_runs/")
@@ -386,32 +234,10 @@ params_aa <- extracts_indir_alpha_alpha$pars %>%
 
 ```
 
+```{r plotIndirParams}
 ```{r plotIndirParams, fig.height=3, fig.width=4}
 
-parplot <- function(modelpars) {
-p1 <- ggplot(modelpars, aes(x=beta_model, color=run)) +
-    geom_density()+
-    theme(legend.position="none") +
-    xlab("beta") +
-    geom_vline(xintercept = unique(modelpars$beta_true))
 
-p2 <- ggplot(modelpars, aes(x=c.1_model, color=run)) +
-    geom_density() +
-    geom_density(aes(x=c.2_model)) +
-    theme(legend.position="none") +
-    xlab("cutpoints") +
-    geom_vline(xintercept = c(unique(modelpars$c.1_true), unique(modelpars$c.2_true)))
-
-p3 <- ggplot(modelpars, aes(x=h.1_group.1_model, color=run)) +
-    geom_density() +
-    geom_density(aes(x=h.2_group.1_model)) +
-    theme(legend.position="none") +
-    xlab("group 1 transitions") +
-    geom_vline(xintercept = c(unique(modelpars$h.1_group.1_true), unique(modelpars$h.2_group.1_true)))
-
-cowplot::plot_grid(p1, p2, p3, labels=paste("model", modelpars$modelid_true))
-
-}
 
 map(params_ba[sort(base::sample(1:12, 5))], parplot) # pick 5 models at random to plot
 map(params_aa[sort(base::sample(1:12, 5))], parplot)
@@ -421,66 +247,21 @@ map(params_aa[sort(base::sample(1:12, 5))], parplot)
 # Recapture rate
 
 ```{r indirHDPI, message=FALSE, warning=FALSE, cache=TRUE}
-# calculate whether true value is in HPDI
-# 
-HPDIlow <- function(x, prob) {
-    HPDI <- rethinking::HPDI(x, prob=prob)
-    return(HPDI[1])
-}
 
-HPDIhigh <- function(x, prob) {
-    HPDI <- rethinking::HPDI(x, prob=prob)
-    return(HPDI[2])
-}
-
-calc_HPDI <- function(params, prob) {
-    params <- params %>%
-        tidyr::pivot_longer(ends_with("model"), names_to = "param", values_to = "param_value") %>%
-        filter(param != "lp___model") %>%
-        tidyr::extract(param, into="param", regex="(.*)_model") %>% # drop model ending
-        rename(modelid=modelid_true)
-
-    # calculate bottom and top of HPDI at prob for each model run and each parameter
-    low <- params %>%
-        group_by(modelid, run, param) %>%
-        summarise(low= HPDIlow(param_value, prob=prob))
-    high <- params %>%
-        group_by(modelid, run, param) %>%
-        summarise(high= HPDIhigh(param_value, prob=prob))
+#recaptured_ba <- which_params_recaptured(params_ba)
+recaptured_aang <- params_aang %>%
+  split(.$modelid) %>%
+  which_params_recaptured()
 
 
-    hdpis <- dplyr::full_join(low, high)
 
-    # true params
-    true <- params %>% dplyr::summarise_at(vars(ends_with("true")), unique)
-    colnames(true) <- stringr::str_replace(colnames(true), "_true", "")
-    true <- select(true, c("c.1", "c.2", "beta", starts_with("alpha"), starts_with("h."))) %>%
-        tidyr::pivot_longer(cols=c("c.1", "c.2", "beta", starts_with("alpha"), starts_with("h.")), names_to = "param", values_to="true")
-
-    # combine true and hdpis for comparison
-    compframe <- full_join(hdpis, true)
+#prop_recaptured_by_param_ba <- calc_recaptured_by_param(recaptured_ba, parframe_indir) 
+prop_recaptured_by_param_aang <- calc_recaptured_by_param(recaptured_aang, parframe_indir)  %>%
+  purrr::map_dfr(bind_rows, .id=".id")
+```
 
 
-    # true param in interval?
-    tf <- compframe %>% mutate(inint = true > low & true < high)
-    return(tf)
-}
 
-# For each parameter (5) in each model (27) in each run (30), is a given parameter in the 50% or 90% HPDI? modelpars is a list of dataframes. Each dataframe in the list contains parameters from 30 runs of 1 model along with the true parameters used to simulate the datasets.
-# output is a list of 2 dataframes 4050 rows each (5x27x30) - with each parameter estimated by the model and an inint column with TRUE if it falls in the HPDI interval and FALSE if not.
-which_params_recaptured <- function(modelpars) {
-    in50 <- map(modelpars, calc_HPDI, prob=0.5)
-
-    #in75 <- map(params_indir, calc_HPDI, prob=0.75)
-
-    in90 <- map(modelpars, calc_HPDI, prob=.90)
-
-    # recaptured parameters (refactor this later so it's all in one df
-    perform50 <- map_dfr(in50, bind_rows)
-    perform90 <- map_dfr(in90, bind_rows)
-
-    return(list(fifty = perform50, ninety=perform90))
-}
 
 
 recaptured_ba <- which_params_recaptured(params_ba)
@@ -488,34 +269,6 @@ recaptured_aa <- which_params_recaptured(params_aa)
 
 calc_prop_recaptured_overall <- function(inint, truepars) {
 
-# trues <- inint$fifty %>%
-#   ungroup() %>%
-#   select(modelid, param, true) %>%
-#   distinct()
-# 
-# nas <- which(is.na(inint$fifty$inint))
-# inint$fifty[nas,]
-
-    # proportion of parameters recaptured
-    prop_recaptured50 <- inint$fifty %>%
-      filter(param != "sigma_group") %>%
-        group_by(modelid, run)  %>%
-        summarise(captured = sum(inint, na.rm = TRUE))  %>%
-        summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
-        full_join(truepars) %>%
-        arrange(beta, desc(mean_captured))
-
-
-    prop_recaptured90 <- inint$ninety %>%
-      filter(param != "sigma_group") %>%
-        group_by(modelid, run) %>%
-        summarise(captured = sum(inint, na.rm=TRUE)) %>%
-        summarise(mean_captured = mean(captured), sd_captured=sd(captured)) %>%
-        full_join(truepars) %>%
-        arrange(beta, desc(mean_captured))
-
-    return(list(fifty = prop_recaptured50, ninety = prop_recaptured90))
-}
 
 prop_recaptured_ba <- calc_prop_recaptured_overall(recaptured_ba, truepars=parframe_indir)
 prop_recaptured_aa <- calc_prop_recaptured_overall(recaptured_aa, truepars=parframe_indir)
